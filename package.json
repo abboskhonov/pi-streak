@@ -1,6 +1,6 @@
 {
   "name": "pi-streak",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A Bun terminal contribution chart for pi agent session usage data",
   "main": "src/index.ts",
   "bin": {

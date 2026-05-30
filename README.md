@@ -18,7 +18,7 @@ bun add --global pi-streak
 ```
 
 Run without installing:
-ger
+
 ```bash
 bunx pi-streak
 ```
@@ -28,10 +28,10 @@ bunx pi-streak
 ```bash
 pi-streak --weeks 26
 pi-streak --dir /path/to/sessions
+pi-streak --today           # show today's activity
 pi-streak --models          # show model breakdown
 pi-streak --projects        # show project breakdown
 pi-streak --json
-pi-streak --no-color
 ```
 
 For local development from this checkout:

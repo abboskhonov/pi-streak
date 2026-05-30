@@ -8,9 +8,27 @@ type Options = {
   dirPath: string;
   weeks: number;
   json: boolean;
-  noColor: boolean;
   models: boolean;
   projects: boolean;
+  today: boolean;
+};
+
+type HourlyActivity = {
+  hour: number;
+  tokens: number;
+  requests: number;
+};
+
+type TodayData = {
+  tokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheTokens: number;
+  requests: number;
+  cost: number;
+  models: ModelRow[];
+  projects: ProjectRow[];
+  hourly: HourlyActivity[];
 };
 
 type ProjectRow = {
@@ -139,10 +157,10 @@ Terminal usage profile generated from the pi session JSONL files.
 Options:
   --dir <path>      Session directory path (default: ~/.pi/agent/sessions)
   --weeks <number>  Heatmap width in weeks, from 4 to 104 (default: 52)
+  --today           Show today's activity breakdown
   --models          Show model usage breakdown
   --projects        Show project usage breakdown
   --json            Print computed data as JSON instead of the dashboard
-  --no-color        Disable ANSI colors
   -h, --help        Show this help`;
 }
 
@@ -151,9 +169,9 @@ function parseArgs(args: string[]): Options {
     dirPath: defaultDirPath,
     weeks: 52,
     json: false,
-    noColor: false,
     models: false,
     projects: false,
+    today: false,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -169,11 +187,6 @@ function parseArgs(args: string[]): Options {
       continue;
     }
 
-    if (argument === "--no-color") {
-      options.noColor = true;
-      continue;
-    }
-
     if (argument === "--models") {
       options.models = true;
       continue;
@@ -181,6 +194,11 @@ function parseArgs(args: string[]): Options {
 
     if (argument === "--projects") {
       options.projects = true;
+      continue;
+    }
+
+    if (argument === "--today") {
+      options.today = true;
       continue;
     }
 
@@ -265,8 +283,8 @@ function computeStreaks(days: Set<string>): { current: number; longest: number }
   return { current, longest };
 }
 
-function color(enabled: boolean, code: string, value: string): string {
-  return enabled ? `\u001b[${code}m${value}${reset}` : value;
+function color(code: string, value: string): string {
+  return `\u001b[${code}m${value}${reset}`;
 }
 
 function activityThresholds(activity: Map<string, DayActivity>): number[] {
@@ -289,13 +307,12 @@ function activityLevel(activity: DayActivity | undefined, thresholds: number[]):
   return 4;
 }
 
-function heatCell(level: number, colors: boolean): string {
-  if (!colors) return ["□", "░", "▒", "▓", "█"][level];
+function heatCell(level: number): string {
   const palette = ["38;5;238", "38;5;22", "38;5;28", "38;5;34", "38;5;40"];
-  return color(true, palette[level], "■");
+  return color(palette[level], "■");
 }
 
-function renderHeatmap(activity: Map<string, DayActivity>, weeks: number, colors: boolean): string[] {
+function renderHeatmap(activity: Map<string, DayActivity>, weeks: number): string[] {
   const today = startOfToday();
   const thisSunday = addDays(today, -today.getDay());
   const firstSunday = addDays(thisSunday, -(weeks - 1) * 7);
@@ -320,12 +337,12 @@ function renderHeatmap(activity: Map<string, DayActivity>, weeks: number, colors
     let row = `  ${labels[weekday]} `;
     for (let week = 0; week < weeks; week += 1) {
       const date = addDays(firstSunday, week * 7 + weekday);
-      row += date > today ? " " : heatCell(activityLevel(activity.get(localDay(date)), thresholds), colors);
+      row += date > today ? " " : heatCell(activityLevel(activity.get(localDay(date)), thresholds));
     }
     lines.push(row);
   }
 
-  const legend = [0, 1, 2, 3, 4].map((level) => heatCell(level, colors)).join("");
+  const legend = [0, 1, 2, 3, 4].map((level) => heatCell(level)).join("");
   lines.push(`      Less ${legend} More`);
   return lines;
 }
@@ -503,6 +520,251 @@ function loadData(dirPath: string): { summary: SummaryRow; daily: DailyRow[]; mo
   return { summary, daily, models, projects };
 }
 
+function loadTodayData(dirPath: string): TodayData {
+  const pricing = loadPricing();
+  const today = localDay(startOfToday());
+  const todayData: TodayData = {
+    tokens: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheTokens: 0,
+    requests: 0,
+    cost: 0,
+    models: [],
+    projects: [],
+    hourly: Array.from({ length: 24 }, (_, h) => ({ hour: h, tokens: 0, requests: 0 })),
+  };
+
+  const modelUsage = new Map<string, ModelRow>();
+  const projectUsage = new Map<string, ProjectRow>();
+
+  if (!existsSync(dirPath)) return todayData;
+
+  const entries = readdirSync(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dirPathNested = join(dirPath, entry.name);
+    const files = readdirSync(dirPathNested).filter((f) => f.endsWith(".jsonl"));
+    for (const file of files) {
+      const filePath = join(dirPathNested, file);
+      const stats = statSync(filePath);
+      if (stats.size === 0) continue;
+
+      let currentModel = "unknown";
+      let currentProject = "unknown";
+
+      const text = readFileSync(filePath, "utf-8");
+      const lines = text.split("\n").filter((l) => l.trim());
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line) as PiMessage;
+
+          if (entry.type === "session" && entry.cwd) {
+            currentProject = entry.cwd;
+          }
+
+          if (entry.type === "model_change" && entry.modelId) {
+            currentModel = entry.modelId;
+          }
+
+          if (entry.type === "message" && entry.message) {
+            const ts = entry.timestamp;
+            const day = ts ? localDay(new Date(ts)) : localDay(new Date());
+            if (day !== today) continue;
+
+            const role = entry.message.role;
+            const usage = entry.message.usage;
+            const msgModel = entry.message.model || currentModel;
+            const hour = ts ? new Date(ts).getHours() : 0;
+
+            if (role === "assistant") {
+              todayData.requests += 1;
+              todayData.hourly[hour].requests += 1;
+            }
+
+            if (usage) {
+              const input = usage.input ?? 0;
+              const output = usage.output ?? 0;
+              const cacheRead = usage.cacheRead ?? 0;
+              const cacheWrite = usage.cacheWrite ?? 0;
+              const total = usage.totalTokens ?? (input + output + cacheRead + cacheWrite);
+              const cost = computeCost(usage, msgModel, pricing);
+
+              todayData.tokens += input + output;
+              todayData.inputTokens += input;
+              todayData.outputTokens += output;
+              todayData.cacheTokens += cacheRead + cacheWrite;
+              todayData.cost += cost;
+              todayData.hourly[hour].tokens += input + output;
+
+              if (!modelUsage.has(msgModel)) {
+                modelUsage.set(msgModel, {
+                  model: msgModel,
+                  tokens: 0,
+                  inputTokens: 0,
+                  outputTokens: 0,
+                  cacheTokens: 0,
+                  cost: 0,
+                  turns: 0,
+                });
+              }
+              const modelRow = modelUsage.get(msgModel)!;
+              modelRow.tokens += input + output;
+              modelRow.inputTokens += input;
+              modelRow.outputTokens += output;
+              modelRow.cacheTokens += cacheRead + cacheWrite;
+              modelRow.cost += cost;
+              if (role === "assistant") {
+                modelRow.turns += 1;
+              }
+
+              if (!projectUsage.has(currentProject)) {
+                projectUsage.set(currentProject, {
+                  project: currentProject,
+                  tokens: 0,
+                  inputTokens: 0,
+                  outputTokens: 0,
+                  cacheTokens: 0,
+                  cost: 0,
+                  requests: 0,
+                });
+              }
+              const projectRow = projectUsage.get(currentProject)!;
+              projectRow.tokens += input + output;
+              projectRow.inputTokens += input;
+              projectRow.outputTokens += output;
+              projectRow.cacheTokens += cacheRead + cacheWrite;
+              projectRow.cost += cost;
+              if (role === "assistant") {
+                projectRow.requests += 1;
+              }
+            }
+          }
+        } catch {
+          // Skip malformed lines
+        }
+      }
+    }
+  }
+
+  todayData.models = [...modelUsage.values()].sort((a, b) => b.tokens - a.tokens);
+  todayData.projects = [...projectUsage.values()].sort((a, b) => b.tokens - a.tokens);
+  return todayData;
+}
+
+function renderToday(data: TodayData): string {
+  const muted = (text: string) => color("38;5;245", text);
+  const highlight = (text: string) => color("1;38;5;255", text);
+  const accent = (text: string) => color("38;5;81", text);
+  const label = (text: string) => color("38;5;250", text);
+
+  const lines: string[] = [""];
+
+  const dateStr = localDay(startOfToday());
+  const inputStr = formatTokens(data.inputTokens);
+  const outputStr = formatTokens(data.outputTokens);
+  const cacheStr = formatTokens(data.cacheTokens);
+  const tokensStr = formatTokens(data.tokens);
+  const costStr = "$" + data.cost.toFixed(4);
+
+  const wDate = Math.max(dateStr.length, "Date".length);
+  const wInput = Math.max(inputStr.length, "Input".length);
+  const wOutput = Math.max(outputStr.length, "Output".length);
+  const wCache = Math.max(cacheStr.length, "Cache".length);
+  const wTokens = Math.max(tokensStr.length, "Tokens".length);
+  const wCost = Math.max(costStr.length, "Cost".length);
+
+  const wh = [wDate, wInput, wOutput, wCache, wTokens, wCost];
+  const hTop = "  ┌─" + wh.map((x) => "─".repeat(x)).join("─┬─") + "─┐";
+  const hSep = "  ├─" + wh.map((x) => "─".repeat(x)).join("─┼─") + "─┤";
+  const hBot = "  └─" + wh.map((x) => "─".repeat(x)).join("─┴─") + "─┘";
+
+  const hDate = muted("Date".padEnd(wDate));
+  const hInput = muted("Input".padEnd(wInput));
+  const hOutput = muted("Output".padEnd(wOutput));
+  const hCache = muted("Cache".padEnd(wCache));
+  const hTokens = muted("Tokens".padEnd(wTokens));
+  const hCost = muted("Cost".padEnd(wCost));
+  const hRow = `  │ ${hDate} │ ${hInput} │ ${hOutput} │ ${hCache} │ ${hTokens} │ ${hCost} │`;
+
+  const cDate = highlight(dateStr.padEnd(wDate));
+  const cInput = highlight(inputStr.padEnd(wInput));
+  const cOutput = highlight(outputStr.padEnd(wOutput));
+  const cCache = highlight(cacheStr.padEnd(wCache));
+  const cTokens = highlight(tokensStr.padEnd(wTokens));
+  const cCost = accent(costStr.padEnd(wCost));
+  const cRow = `  │ ${cDate} │ ${cInput} │ ${cOutput} │ ${cCache} │ ${cTokens} │ ${cCost} │`;
+
+  lines.push(hTop);
+  lines.push(hRow);
+  lines.push(hSep);
+  lines.push(cRow);
+  lines.push(hBot);
+  lines.push("");
+
+  if (data.projects.length > 0) {
+    const projectNames = data.projects.map((p) => truncateModel(basename(p.project), 18));
+    const inputStrs = data.projects.map((p) => formatTokens(p.inputTokens));
+    const outputStrs = data.projects.map((p) => formatTokens(p.outputTokens));
+    const cacheStrs = data.projects.map((p) => formatTokens(p.cacheTokens));
+    const tokenStrs = data.projects.map((p) => formatTokens(p.tokens));
+    const costStrs = data.projects.map((p) => "$" + p.cost.toFixed(4));
+
+    const wProject = Math.max(...projectNames.map((s) => s.length), "Project".length);
+    const wInput = Math.max(...inputStrs.map((s) => s.length), "Input".length);
+    const wOutput = Math.max(...outputStrs.map((s) => s.length), "Output".length);
+    const wCache = Math.max(...cacheStrs.map((s) => s.length), "Cache".length);
+    const wTokens = Math.max(...tokenStrs.map((s) => s.length), "Tokens".length);
+    const wCost = Math.max(...costStrs.map((s) => s.length), "Cost".length);
+
+    const w = [wProject, wInput, wOutput, wCache, wTokens, wCost];
+    const top = "  ┌─" + w.map((x) => "─".repeat(x)).join("─┬─") + "─┐";
+    const sep = "  ├─" + w.map((x) => "─".repeat(x)).join("─┼─") + "─┤";
+    const bot = "  └─" + w.map((x) => "─".repeat(x)).join("─┴─") + "─┘";
+
+    const hProject = muted("Project".padEnd(wProject));
+    const hInput = muted("Input".padStart(wInput));
+    const hOutput = muted("Output".padStart(wOutput));
+    const hCache = muted("Cache".padStart(wCache));
+    const hTokens = muted("Tokens".padStart(wTokens));
+    const hCost = muted("Cost".padStart(wCost));
+    const headerRow = `  │ ${hProject} │ ${hInput} │ ${hOutput} │ ${hCache} │ ${hTokens} │ ${hCost} │`;
+
+    lines.push(top);
+    lines.push(headerRow);
+    lines.push(sep);
+
+    for (let i = 0; i < data.projects.length; i++) {
+      const cProject = projectNames[i].padEnd(wProject);
+      const cInput = highlight(inputStrs[i].padStart(wInput));
+      const cOutput = highlight(outputStrs[i].padStart(wOutput));
+      const cCache = highlight(cacheStrs[i].padStart(wCache));
+      const cTokens = highlight(tokenStrs[i].padStart(wTokens));
+      const cCost = accent(costStrs[i].padStart(wCost));
+      lines.push(`  │ ${cProject} │ ${cInput} │ ${cOutput} │ ${cCache} │ ${cTokens} │ ${cCost} │`);
+    }
+
+    lines.push(bot);
+    lines.push("");
+  }
+
+  const activeHours = data.hourly.filter((h) => h.tokens > 0);
+  const maxHourly = Math.max(...activeHours.map((h) => h.tokens), 1);
+  const barLen = 20;
+
+  lines.push(`  ${highlight("Active hours")}`);
+  for (const h of activeHours) {
+    const hourStr = String(h.hour).padStart(2, "0") + ":00";
+    const barCount = Math.round((h.tokens / maxHourly) * barLen);
+    const bar = "█".repeat(barCount).padEnd(barLen, "░");
+    const tokens = formatTokens(h.tokens);
+    lines.push(`  ${hourStr}  ${highlight(bar)}  ${tokens}`);
+  }
+  lines.push("");
+
+  return lines.join("\n");
+}
+
 function formatTokens(value: number): string {
   if (value >= 1_000_000_000) return (value / 1_000_000_000).toFixed(2) + "B";
   if (value >= 1_000_000) return (value / 1_000_000).toFixed(2) + "M";
@@ -516,10 +778,10 @@ function truncateModel(model: string, maxLen: number): string {
   return model.slice(0, keep) + "..." + model.slice(-keep);
 }
 
-function renderProjects(projects: ProjectRow[], colors: boolean): string {
-  const muted = (text: string) => color(colors, "38;5;245", text);
-  const highlight = (text: string) => color(colors, "1;38;5;255", text);
-  const accent = (text: string) => color(colors, "38;5;81", text);
+function renderProjects(projects: ProjectRow[]): string {
+  const muted = (text: string) => color("38;5;245", text);
+  const highlight = (text: string) => color("1;38;5;255", text);
+  const accent = (text: string) => color("38;5;81", text);
 
   const lines: string[] = ["", `  ${highlight("Project usage")}`];
 
@@ -556,10 +818,10 @@ function renderProjects(projects: ProjectRow[], colors: boolean): string {
   return lines.join("\n");
 }
 
-function renderModels(models: ModelRow[], colors: boolean): string {
-  const muted = (text: string) => color(colors, "38;5;245", text);
-  const highlight = (text: string) => color(colors, "1;38;5;255", text);
-  const accent = (text: string) => color(colors, "38;5;81", text);
+function renderModels(models: ModelRow[]): string {
+  const muted = (text: string) => color("38;5;245", text);
+  const highlight = (text: string) => color("1;38;5;255", text);
+  const accent = (text: string) => color("38;5;81", text);
 
   const lines: string[] = ["", `  ${highlight("Model usage")}`];
 
@@ -597,7 +859,6 @@ function renderModels(models: ModelRow[], colors: boolean): string {
 }
 
 function renderDashboard(options: Options, summary: SummaryRow, daily: DailyRow[]): string {
-  const colors = !options.noColor && Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
   const activeDays = new Set(daily.filter((day) => day.turns > 0).map((day) => day.day));
   const streaks = computeStreaks(activeDays);
   const activity = new Map(daily.map((day) => [day.day, { tokens: day.tokens, turns: day.turns }]));
@@ -606,13 +867,13 @@ function renderDashboard(options: Options, summary: SummaryRow, daily: DailyRow[
   const visibleDays = daily.filter((day) => day.day >= localDay(firstSunday) && day.day <= localDay(today));
   const visibleTokens = visibleDays.reduce((sum, day) => sum + day.tokens, 0);
   const visibleActiveDays = visibleDays.filter((day) => day.turns > 0).length;
-  const muted = (text: string) => color(colors, "38;5;245", text);
-  const highlight = (text: string) => color(colors, "1;38;5;255", text);
+  const muted = (text: string) => color("38;5;245", text);
+  const highlight = (text: string) => color("1;38;5;255", text);
   const output = [
     "",
     `  ${highlight("π pi activity")}  ${highlight(compactNumber(visibleTokens))} tokens / ${options.weeks} weeks  ${muted(formatPath(options.dirPath))}`,
     "",
-    ...renderHeatmap(activity, options.weeks, colors),
+    ...renderHeatmap(activity, options.weeks),
     `  ${visibleActiveDays} active days  ${muted("|")}  ${streaks.current} day streak  ${muted("|")}  ${streaks.longest} best  ${muted("|")}  ${compactNumber(summary.lifetimeTokens)} all-time`,
     "",
   ];
@@ -655,13 +916,19 @@ function main(): void {
     return;
   }
 
+  if (options.today) {
+    const todayData = loadTodayData(options.dirPath);
+    console.log(renderToday(todayData));
+    return;
+  }
+
   if (options.models) {
-    console.log(renderModels(models, !options.noColor && Boolean(process.stdout.isTTY) && !process.env.NO_COLOR));
+    console.log(renderModels(models));
     return;
   }
 
   if (options.projects) {
-    console.log(renderProjects(projects, !options.noColor && Boolean(process.stdout.isTTY) && !process.env.NO_COLOR));
+    console.log(renderProjects(projects));
     return;
   }
 
@@ -669,4 +936,3 @@ function main(): void {
 }
 
 main();
-  
