@@ -7,15 +7,22 @@ import type { DailyRow } from "./lib/types";
 const configDir = join(homedir(), ".pi");
 const configPath = join(configDir, "streak.json");
 const apiBase = process.env.PI_STREAK_API_URL ?? "https://pi-streak.telecraft.workers.dev";
-const clientHeaders = {
-  "Content-Type": "application/json",
-  "X-Client-Secret": process.env.PI_STREAK_CLIENT_SECRET ?? "",
-};
+function makeHeaders(config?: StreakConfig) {
+  return {
+    "Content-Type": "application/json",
+    "X-Client-Secret": getClientSecret(config),
+  };
+}
 
 export type StreakConfig = {
   username: string;
   apiKey: string;
+  clientSecret?: string;
 };
+
+function getClientSecret(config?: StreakConfig): string {
+  return process.env.PI_STREAK_CLIENT_SECRET ?? config?.clientSecret ?? "";
+}
 
 export function loadConfig(): StreakConfig | null {
   if (!existsSync(configPath)) return null;
@@ -39,23 +46,24 @@ export function getGitUsername(): string | null {
   return null;
 }
 
-export async function register(username: string): Promise<string> {
+export async function register(username: string): Promise<{ apiKey: string; clientSecret: string }> {
   const res = await fetch(`${apiBase}/api/register`, {
     method: "POST",
-    headers: clientHeaders,
+    headers: makeHeaders(),
     body: JSON.stringify({ username }),
   });
-  const data = await res.json() as { apiKey?: string; error?: string };
+  const data = await res.json() as { apiKey?: string; clientSecret?: string; error?: string };
   if (!res.ok) {
     throw new Error(data.error ?? `Registration failed (${res.status})`);
   }
   if (!data.apiKey) throw new Error("No apiKey returned");
-  return data.apiKey;
+  return { apiKey: data.apiKey, clientSecret: data.clientSecret ?? "" };
 }
 
 export async function sync(
   username: string,
   apiKey: string,
+  clientSecret: string,
   daily: DailyRow[],
   streak: number,
   activeDays: number
@@ -68,7 +76,7 @@ export async function sync(
 
   const res = await fetch(`${apiBase}/api/sync`, {
     method: "POST",
-    headers: clientHeaders,
+    headers: makeHeaders({ username, apiKey, clientSecret }),
     body: JSON.stringify({
       apiKey,
       username,
@@ -93,12 +101,14 @@ export async function sync(
   console.log(`  Synced ${data.synced ?? 0} days for @${username}`);
 }
 
-export async function fetchLeaderboard(period: string): Promise<{
+export async function fetchLeaderboard(period: string, clientSecret?: string): Promise<{
   period: string;
   count: number;
   users: { rank: number; username: string; tokens: number; streak: number; activeDays: number; today: number }[];
 }> {
-  const res = await fetch(`${apiBase}/api/leaderboard?period=${period}&limit=50`);
+  const res = await fetch(`${apiBase}/api/leaderboard?period=${period}&limit=50`, {
+    headers: clientSecret ? { "X-Client-Secret": clientSecret } : undefined,
+  });
   if (!res.ok) {
     throw new Error(`Failed to fetch leaderboard (${res.status})`);
   }

@@ -7,7 +7,7 @@ export interface CloudflareBindings {
 }
 
 const MAX_DAILY_TOKENS = 1_000_000_000; // 1B cap per day
-const SYNC_COOLDOWN_SECONDS = 3600; // 1 hour between syncs
+const SYNC_COOLDOWN_SECONDS = 1000; // ~16 min between syncs
 
 function requireClientHeader(c: any) {
   const secret = c.env.CLIENT_SECRET;
@@ -39,7 +39,7 @@ app.post('/api/register', async (c) => {
 
     const apiKey = crypto.randomUUID();
     const user = await createUser(c.env.DB, username, apiKey);
-    return c.json({ username: user.username, apiKey: user.api_key }, 201);
+    return c.json({ username: user.username, apiKey: user.api_key, clientSecret: c.env.CLIENT_SECRET }, 201);
   } catch (err) {
     return c.json({ error: 'Database error. Is D1 configured?' }, 500);
   }

@@ -28,7 +28,7 @@ async function main(): Promise<void> {
     const activeDays = daily.filter((day) => day.turns > 0).length;
 
     if (config) {
-      await syncFn(config.username, config.apiKey, daily, streaks.current, activeDays);
+      await syncFn(config.username, config.apiKey, config.clientSecret ?? "", daily, streaks.current, activeDays);
     } else {
       const username = getGitUsername();
       if (!username) {
@@ -36,10 +36,10 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       try {
-        const apiKey = await register(username);
-        saveConfig({ username, apiKey });
+        const { apiKey, clientSecret } = await register(username);
+        saveConfig({ username, apiKey, clientSecret });
         console.log(`  Registered @${username}. API key saved to ~/.pi/streak.json`);
-        await syncFn(username, apiKey, daily, streaks.current, activeDays);
+        await syncFn(username, apiKey, clientSecret, daily, streaks.current, activeDays);
       } catch (err) {
         console.error(`pi-streak: ${(err as Error).message}`);
         process.exit(1);
@@ -49,9 +49,10 @@ async function main(): Promise<void> {
   }
 
   if (options.command === "rank") {
-    const { fetchLeaderboard, getGitUsername } = await import("./sync");
+    const { fetchLeaderboard, getGitUsername, loadConfig } = await import("./sync");
+    const config = loadConfig();
     const period = options.rankPeriod ?? "alltime";
-    const { users, period: returnedPeriod } = await fetchLeaderboard(period);
+    const { users, period: returnedPeriod } = await fetchLeaderboard(period, config?.clientSecret);
     const muted = (text: string) => color("38;5;245", text);
     const dim = (text: string) => color("38;5;240", text);
     const highlight = (text: string) => color("1;38;5;255", text);
