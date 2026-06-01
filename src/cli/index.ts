@@ -89,12 +89,12 @@ async function main(): Promise<void> {
     const showUser = userInList && !showAll && userRank > limit;
 
     const wRank = Math.max(String(users.length + (showUser ? 1 : 0)).length, "#".length);
-    const wUser = Math.max(...users.map((u) => `@${u.username}`.length + (u.username === currentUser ? 8 : 0)), "User".length);
-    const wTokens = Math.max(...users.map((u) => formatTokens(u.tokens).length), "Tokens".length);
-    const wStreak = Math.max(...users.map((u) => String(u.streak).length), "Streak".length);
-    const wToday = Math.max(...users.map((u) => formatTokens(u.today).length), "Today".length);
-    const wActive = Math.max(...users.map((u) => String(u.activeDays).length), "Days".length);
-    const totalWidth = wRank + wUser + wTokens + wStreak + wToday + wActive + 15;
+    const wUser = Math.max(...users.map((u) => `@${u.username}`.length + (u.username === currentUser ? 8 : 0)), "User".length) + 4;
+    const wTokens = Math.max(...users.map((u) => formatTokens(u.tokens).length), "Tokens".length) + 2;
+    const wStreak = Math.max(...users.map((u) => String(u.streak).length), "Streak".length) + 2;
+    const wToday = Math.max(...users.map((u) => formatTokens(u.today).length), "Today".length) + 2;
+    const wActive = Math.max(...users.map((u) => String(u.activeDays).length), "Days".length) + 2;
+    const totalWidth = wRank + wUser + wTokens + wStreak + wToday + wActive + 24;
 
     console.log("");
     const headerLeft = `${highlight("π leaderboard")}  ${muted(returnedPeriod)}`;
@@ -109,7 +109,7 @@ async function main(): Promise<void> {
     const hStreak = muted("Streak".padStart(wStreak));
     const hToday = muted("Today".padStart(wToday));
     const hActive = muted("Days".padStart(wActive));
-    const headerRow = `  ${hRank}  ${hUser}  ${hTokens}  ${hStreak}  ${hToday}  ${hActive}`;
+    const headerRow = `  ${hRank}    ${hUser}    ${hTokens}    ${hStreak}    ${hToday}    ${hActive}`;
     console.log(headerRow);
     console.log(`  ${muted("─".repeat(totalWidth))}`);
 
@@ -132,7 +132,7 @@ async function main(): Promise<void> {
       const styledToday = isYou ? todayStr : muted(u.today > 0 ? formatTokens(u.today).padStart(wToday) : "—".padStart(wToday));
       const styledActive = isYou ? activeStr : muted(u.activeDays > 0 ? String(u.activeDays).padStart(wActive) : "—".padStart(wActive));
 
-      console.log(`  ${styledRank}  ${styledUser}  ${styledTokens}  ${styledStreak}  ${styledToday}  ${styledActive}`);
+      console.log(`  ${styledRank}    ${styledUser}    ${styledTokens}    ${styledStreak}    ${styledToday}    ${styledActive}`);
       console.log(`  ${dim("─".repeat(totalWidth))}`);
     }
 
@@ -141,7 +141,7 @@ async function main(): Promise<void> {
     }
 
     if (showUser) {
-      console.log(`  ${dim("...".padStart(wRank))}  ${dim("...".padEnd(wUser))}  ${dim("...".padStart(wTokens))}  ${dim("...".padStart(wStreak))}  ${dim("...".padStart(wToday))}  ${dim("...".padStart(wActive))}`);
+      console.log(`  ${dim("...".padStart(wRank))}    ${dim("...".padEnd(wUser))}    ${dim("...".padStart(wTokens))}    ${dim("...".padStart(wStreak))}    ${dim("...".padStart(wToday))}    ${dim("...".padStart(wActive))}`);
       console.log(`  ${dim("─".repeat(totalWidth))}`);
       renderRow(userInList);
     }
