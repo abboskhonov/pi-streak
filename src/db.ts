@@ -37,6 +37,27 @@ export async function updateLastSync(db: D1Database, userId: number): Promise<vo
   await db.prepare('UPDATE users SET last_sync = ? WHERE id = ?').bind(Math.floor(Date.now() / 1000), userId).run();
 }
 
+export async function countSyncRequestsInLastHour(db: D1Database, userId: number): Promise<number> {
+  const now = Math.floor(Date.now() / 1000);
+  const oneHourAgo = now - 3600;
+  try {
+    const result = await db
+      .prepare('SELECT COUNT(*) as count FROM sync_logs WHERE user_id = ? AND timestamp > ?')
+      .bind(userId, oneHourAgo)
+      .first<{ count: number }>();
+    return result?.count ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function logSyncRequest(db: D1Database, userId: number): Promise<void> {
+  await db
+    .prepare('INSERT INTO sync_logs (user_id, timestamp) VALUES (?, ?)')
+    .bind(userId, Math.floor(Date.now() / 1000))
+    .run();
+}
+
 export async function upsertDailyStats(
   db: D1Database,
   userId: number,

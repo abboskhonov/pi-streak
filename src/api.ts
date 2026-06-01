@@ -1,13 +1,13 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { createUser, getUserByApiKey, getUserByUsername, upsertDailyStats, getLeaderboardAllTime, getLeaderboardDay, getLeaderboardWeek, getLeaderboardMonth, updateLastSync } from './db';
+import { createUser, getUserByApiKey, getUserByUsername, upsertDailyStats, getLeaderboardAllTime, getLeaderboardDay, getLeaderboardWeek, getLeaderboardMonth, updateLastSync, countSyncRequestsInLastHour, logSyncRequest } from './db';
 
 export interface CloudflareBindings {
   DB: D1Database;
 }
 
 const MAX_DAILY_TOKENS = 1_000_000_000; // 1B cap per day
-const SYNC_COOLDOWN_SECONDS = 1000; // ~16 min between syncs
+const MAX_SYNC_PER_HOUR = 1000; // 1000 syncs per hour per user
 
 function requireClientHeader(c: any) {
   const secret = c.env.CLIENT_SECRET;
@@ -64,10 +64,9 @@ app.post('/api/sync', async (c) => {
     const user = await getUserByApiKey(c.env.DB, apiKey);
     if (!user) return c.json({ error: 'Invalid apiKey' }, 401);
 
-    const now = Math.floor(Date.now() / 1000);
-    if (user.last_sync && (now - user.last_sync) < SYNC_COOLDOWN_SECONDS) {
-      const wait = SYNC_COOLDOWN_SECONDS - (now - user.last_sync);
-      return c.json({ error: `Rate limited. Wait ${wait}s before next sync.` }, 429);
+    const requestCount = await countSyncRequestsInLastHour(c.env.DB, user.id);
+    if (requestCount >= MAX_SYNC_PER_HOUR) {
+      return c.json({ error: `Rate limited. ${MAX_SYNC_PER_HOUR} syncs per hour exceeded.` }, 429);
     }
 
     const days = body?.days ?? [];
@@ -96,6 +95,7 @@ app.post('/api/sync', async (c) => {
       synced += 1;
     }
 
+    await logSyncRequest(c.env.DB, user.id);
     await updateLastSync(c.env.DB, user.id);
 
     return c.json({ ok: true, synced, username: user.username }, 200);
