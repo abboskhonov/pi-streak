@@ -6,9 +6,6 @@
   // "compatibility_flags": [
   //   "nodejs_compat"
   // ],
-  "vars": {
-    "CLIENT_SECRET": "change-me-in-production"
-  },
   // "kv_namespaces": [
   //   {
   //     "binding": "MY_KV_NAMESPACE",
