@@ -21,22 +21,23 @@ async function main(): Promise<void> {
   }
 
   if (options.command === "sync") {
-    const { loadConfig, getGitUsername, saveConfig, register, rotateKey, sync: syncFn } = await import("./sync");
+    const { loadConfig, getGitUsername, saveConfig, getOrCreateKeypair, register, authorizeDevice, sync: syncFn, getGithubToken } = await import("./sync");
     const config = loadConfig();
     const { daily } = loadData(options.dirPath);
     const streaks = computeStreaks(new Set(daily.filter((day) => day.turns > 0).map((day) => day.day)));
     const activeDays = daily.filter((day) => day.turns > 0).length;
 
-    const username = getGitUsername();
+    const username = getGitUsername() ?? "";
     if (!username) {
       console.error("pi-streak: could not determine username. Set git config github.user or user.name");
       process.exit(1);
     }
 
     const clientSecret = process.env.PI_STREAK_CLIENT_SECRET ?? "";
+    const { publicKey: devicePubkey, privateKey } = await getOrCreateKeypair();
 
-    async function trySync(apiKey: string) {
-      await syncFn(username, apiKey, daily, streaks.current, activeDays);
+    async function trySync() {
+      await syncFn(username, devicePubkey, privateKey, daily, streaks.current, activeDays);
     }
 
     async function doRegister() {
@@ -44,31 +45,61 @@ async function main(): Promise<void> {
         console.error("pi-streak: missing clientSecret. Set PI_STREAK_CLIENT_SECRET env var.");
         process.exit(1);
       }
-      const { apiKey: newKey, recoveryToken: newToken } = await register(username, clientSecret);
-      saveConfig({ username, apiKey: newKey, recoveryToken: newToken });
-      console.log(`  Registered @${username}. API key saved to ~/.pi/streak.json`);
-      await trySync(newKey);
-    }
-
-    async function doRecover() {
-      const recoveryToken = config?.recoveryToken;
-      if (!recoveryToken) {
-        console.error("pi-streak: API key invalid and no recovery token. Re-register with a new username.");
-        process.exit(1);
-      }
-      const { apiKey: newKey, recoveryToken: newToken } = await rotateKey("", recoveryToken);
-      saveConfig({ username, apiKey: newKey, recoveryToken: newToken });
-      console.log(`  Recovered @${username}. API key saved to ~/.pi/streak.json`);
-      await trySync(newKey);
-    }
-
-    if (config?.apiKey && clientSecret) {
       try {
-        await trySync(config.apiKey);
+        await register(username, devicePubkey, clientSecret);
+        saveConfig({ username, devicePubkey });
+        console.log(`  Registered @${username}. Device key saved to ~/.pi/streak.json`);
+        await trySync();
       } catch (err) {
         const msg = (err as Error).message;
-        if (msg.includes("Invalid apiKey")) {
-          await doRecover();
+        if (msg.includes("Username taken") || msg.includes("needsAuthorization")) {
+          await doAuthorize();
+        } else {
+          console.error(`pi-streak: ${msg}`);
+          process.exit(1);
+        }
+      }
+    }
+
+    async function doAuthorize() {
+      console.log("  Username taken. Authorizing device...");
+      let githubToken = config?.githubToken ?? undefined;
+      if (!githubToken) {
+        githubToken = (await getGithubToken()) ?? undefined;
+      }
+      if (!githubToken) {
+        // Ask for manual token
+        const readline = require("readline");
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const prompt = (q: string) => new Promise<string>((resolve) => rl.question(q, resolve));
+        console.log("  GitHub token needed to authorize this device.");
+        console.log("  Get one at: https://github.com/settings/tokens/new");
+        console.log("  (needed scope: read:user)");
+        githubToken = await prompt("  Paste token: ");
+        rl.close();
+      }
+      if (!githubToken) {
+        console.error("pi-streak: GitHub token required to authorize device.");
+        process.exit(1);
+      }
+      try {
+        await authorizeDevice(devicePubkey, githubToken, clientSecret);
+        saveConfig({ username, devicePubkey, githubToken });
+        console.log(`  Authorized @${username} on this device.`);
+        await trySync();
+      } catch (err) {
+        console.error(`pi-streak: ${(err as Error).message}`);
+        process.exit(1);
+      }
+    }
+
+    if (config?.devicePubkey && config.username === username) {
+      try {
+        await trySync();
+      } catch (err) {
+        const msg = (err as Error).message;
+        if (msg.includes("Invalid device") || msg.includes("Invalid signature")) {
+          await doAuthorize();
         } else {
           console.error(`pi-streak: ${msg}`);
           process.exit(1);

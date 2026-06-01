@@ -7,8 +7,14 @@ import type { DailyRow } from "./lib/types";
 
 const configDir = join(homedir(), ".pi");
 const configPath = join(configDir, "streak.json");
+const keyPath = join(configDir, "streak.pem");
 const apiBase = process.env.PI_STREAK_API_URL ?? "https://pi-streak.telecraft.workers.dev";
-function makeHeaders() {
+
+function getClientSecret(): string {
+  return process.env.PI_STREAK_CLIENT_SECRET ?? "";
+}
+
+function makeHeaders(): Record<string, string> {
   return {
     "Content-Type": "application/json",
     "X-Client-Secret": getClientSecret(),
@@ -17,13 +23,9 @@ function makeHeaders() {
 
 export type StreakConfig = {
   username: string;
-  apiKey: string;
-  recoveryToken?: string;
+  devicePubkey: string;
+  githubToken?: string;
 };
-
-function getClientSecret(): string {
-  return process.env.PI_STREAK_CLIENT_SECRET ?? "";
-}
 
 export function loadConfig(): StreakConfig | null {
   if (!existsSync(configPath)) return null;
@@ -47,44 +49,81 @@ export function getGitUsername(): string | null {
   return null;
 }
 
-export async function register(username: string, clientSecret?: string): Promise<{ apiKey: string; recoveryToken: string }> {
+// Generate Ed25519 keypair using Web Crypto
+async function generateKeypair(): Promise<{ publicKey: string; privateKey: string }> {
+  const keypair = await crypto.subtle.generateKey(
+    { name: "Ed25519" } as AlgorithmIdentifier,
+    true,
+    ["sign", "verify"]
+  ) as CryptoKeyPair;
+  const pubKey = await crypto.subtle.exportKey("raw", keypair.publicKey);
+  const privKey = await crypto.subtle.exportKey("raw", keypair.privateKey);
+  return {
+    publicKey: btoa(String.fromCharCode(...new Uint8Array(pubKey as ArrayBuffer))),
+    privateKey: btoa(String.fromCharCode(...new Uint8Array(privKey as ArrayBuffer))),
+  };
+}
+
+export async function getOrCreateKeypair(): Promise<{ publicKey: string; privateKey: string }> {
+  if (existsSync(keyPath)) {
+    const pem = readFileSync(keyPath, "utf-8");
+    const lines = pem.split("\n").filter(Boolean);
+    const [pubKeyLabel, pubKey, privKeyLabel, privKey] = lines;
+    if (pubKeyLabel === "PUBLIC:" && privKeyLabel === "PRIVATE:" && pubKey && privKey) {
+      return { publicKey: pubKey, privateKey: privKey };
+    }
+  }
+  const keys = await generateKeypair();
+  if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+  writeFileSync(keyPath, `PUBLIC:\n${keys.publicKey}\nPRIVATE:\n${keys.privateKey}\n`, { mode: 0o600 });
+  return keys;
+}
+
+async function signPayload(privateKeyB64: string, payload: string): Promise<string> {
+  const privKeyBytes = Uint8Array.from(atob(privateKeyB64), c => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    privKeyBytes,
+    { name: "Ed25519" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("Ed25519", key, new TextEncoder().encode(payload));
+  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+}
+
+export async function register(username: string, devicePubkey: string, clientSecret?: string): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (clientSecret) headers["X-Client-Secret"] = clientSecret;
   const res = await fetch(`${apiBase}/api/register`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ username }),
+    body: JSON.stringify({ username, devicePubkey }),
   });
-  const data = await res.json() as { apiKey?: string; recoveryToken?: string; error?: string };
+  const data = await res.json() as { error?: string; needsAuthorization?: boolean };
   if (!res.ok) {
     throw new Error(data.error ?? `Registration failed (${res.status})`);
   }
-  if (!data.apiKey) throw new Error("No apiKey returned");
-  return { apiKey: data.apiKey, recoveryToken: data.recoveryToken ?? "" };
 }
 
-export async function rotateKey(apiKey: string, recoveryToken?: string): Promise<{ apiKey: string; recoveryToken: string }> {
-  const body: Record<string, string> = {};
-  if (apiKey) body.apiKey = apiKey;
-  if (recoveryToken) body.recoveryToken = recoveryToken;
-
-  const res = await fetch(`${apiBase}/api/rotate-key`, {
+export async function authorizeDevice(devicePubkey: string, githubToken: string, clientSecret?: string): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (clientSecret) headers["X-Client-Secret"] = clientSecret;
+  const res = await fetch(`${apiBase}/api/authorize-device`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    headers,
+    body: JSON.stringify({ devicePubkey, githubToken }),
   });
-
-  const data = await res.json() as { apiKey?: string; recoveryToken?: string; error?: string };
+  const data = await res.json() as { error?: string };
   if (!res.ok) {
-    throw new Error(data.error ?? `Rotate key failed (${res.status})`);
+    throw new Error(data.error ?? `Authorization failed (${res.status})`);
   }
-  if (!data.apiKey) throw new Error("No apiKey returned");
-  return { apiKey: data.apiKey, recoveryToken: data.recoveryToken ?? "" };
 }
 
 export async function sync(
   username: string,
-  apiKey: string,
+  devicePubkey: string,
+  privateKey: string,
   daily: DailyRow[],
   streak: number,
   activeDays: number
@@ -123,14 +162,14 @@ export async function sync(
     activeDays: Math.max(0, Math.floor(activeDays)),
   });
 
-  const signature = createHmac("sha256", apiKey).update(payload).digest("hex");
+  const signature = await signPayload(privateKey, payload);
 
   const res = await fetch(`${apiBase}/api/sync`, {
     method: "POST",
     headers: makeHeaders(),
     body: JSON.stringify({
-      apiKey,
       username,
+      devicePubkey,
       streak,
       activeDays,
       days: daysPayload,
@@ -162,4 +201,34 @@ export async function fetchLeaderboard(period: string, limit = 50): Promise<{
     count: number;
     users: { rank: number; username: string; tokens: number; streak: number; activeDays: number; today: number }[];
   }>;
+}
+
+// GitHub token flow
+export async function getGithubToken(): Promise<string | null> {
+  // Path 1: gh CLI
+  const ghResult = spawnSync("gh", ["auth", "token"], { encoding: "utf-8" });
+  if (ghResult.stdout?.trim()) return ghResult.stdout.trim();
+  if ((ghResult.error as NodeJS.ErrnoException | null)?.code === "ENOENT") {
+    // gh not installed
+    return null;
+  }
+  if (ghResult.status !== 0) {
+    // gh installed but not authenticated
+    return null;
+  }
+  return null;
+}
+
+export async function openBrowserOAuth(): Promise<string | null> {
+  // Browser OAuth flow - simplified to manual paste
+  return null;
+}
+
+export async function promptForGithubToken(): Promise<string> {
+  console.log("  GitHub token needed to authorize this device.");
+  console.log("  Get one at: https://github.com/settings/tokens/new");
+  console.log("  (needed scope: read:user)");
+  // Use readline or prompt for input
+  const result = spawnSync("read", ["-p", "  Paste token: "], { encoding: "utf-8", shell: true });
+  return result.stdout?.trim() ?? "";
 }

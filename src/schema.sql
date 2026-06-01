@@ -3,9 +3,17 @@
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT UNIQUE NOT NULL,
-  api_key TEXT UNIQUE NOT NULL,
-  recovery_token TEXT UNIQUE,
+  github_username TEXT,
   created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_devices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  device_pubkey TEXT UNIQUE NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_sync INTEGER DEFAULT 0,
+  FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS daily_stats (

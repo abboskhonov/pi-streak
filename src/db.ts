@@ -3,7 +3,7 @@ import type { D1Database } from '@cloudflare/workers-types';
 export type User = {
   id: number;
   username: string;
-  api_key: string;
+  github_username: string | null;
   created_at: number;
 };
 
@@ -15,11 +15,11 @@ export type LeaderboardRow = {
   todayTokens: number;
 };
 
-export async function createUser(db: D1Database, username: string, apiKey: string, recoveryToken: string): Promise<User> {
+export async function createUser(db: D1Database, username: string, githubUsername: string | null): Promise<User> {
   const now = Math.floor(Date.now() / 1000);
   const result = await db
-    .prepare('INSERT INTO users (username, api_key, recovery_token, created_at) VALUES (?, ?, ?, ?) RETURNING *')
-    .bind(username, apiKey, recoveryToken, now)
+    .prepare('INSERT INTO users (username, github_username, created_at) VALUES (?, ?, ?) RETURNING *')
+    .bind(username, githubUsername, now)
     .first<User>();
   if (!result) throw new Error('Failed to create user');
   return result;
@@ -29,16 +29,31 @@ export async function getUserByUsername(db: D1Database, username: string): Promi
   return await db.prepare('SELECT * FROM users WHERE username = ?').bind(username).first<User>();
 }
 
-export async function getUserByApiKey(db: D1Database, apiKey: string): Promise<{ id: number; username: string; api_key: string; created_at: number; last_sync: number } | null> {
-  return await db.prepare('SELECT * FROM users WHERE api_key = ?').bind(apiKey).first<{ id: number; username: string; api_key: string; created_at: number; last_sync: number }>();
+export async function getUserByGithubUsername(db: D1Database, githubUsername: string): Promise<User | null> {
+  return await db.prepare('SELECT * FROM users WHERE github_username = ?').bind(githubUsername).first<User>();
 }
 
-export async function getUserByRecoveryToken(db: D1Database, recoveryToken: string): Promise<User | null> {
-  return await db.prepare('SELECT * FROM users WHERE recovery_token = ?').bind(recoveryToken).first<User>();
+export async function getUserByDevicePubkey(db: D1Database, devicePubkey: string): Promise<User | null> {
+  const result = await db
+    .prepare('SELECT u.* FROM users u JOIN user_devices d ON u.id = d.user_id WHERE d.device_pubkey = ?')
+    .bind(devicePubkey)
+    .first<User>();
+  return result ?? null;
 }
 
-export async function updateLastSync(db: D1Database, userId: number): Promise<void> {
-  await db.prepare('UPDATE users SET last_sync = ? WHERE id = ?').bind(Math.floor(Date.now() / 1000), userId).run();
+export async function addDevice(db: D1Database, userId: number, devicePubkey: string): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  await db
+    .prepare('INSERT INTO user_devices (user_id, device_pubkey, created_at, last_sync) VALUES (?, ?, ?, ?)')
+    .bind(userId, devicePubkey, now, 0)
+    .run();
+}
+
+export async function updateDeviceLastSync(db: D1Database, userId: number, devicePubkey: string): Promise<void> {
+  await db
+    .prepare('UPDATE user_devices SET last_sync = ? WHERE user_id = ? AND device_pubkey = ?')
+    .bind(Math.floor(Date.now() / 1000), userId, devicePubkey)
+    .run();
 }
 
 export async function countSyncRequestsInLastHour(db: D1Database, userId: number): Promise<number> {
