@@ -6,7 +6,7 @@ import type { DailyRow } from "./lib/types";
 
 const configDir = join(homedir(), ".pi");
 const configPath = join(configDir, "streak.json");
-const apiBase = process.env.PI_STREAK_API_URL ?? "https://api.telecraft.workers.dev";
+const apiBase = process.env.PI_STREAK_API_URL ?? "https://pi-streak.telecraft.workers.dev";
 const clientHeaders = {
   "Content-Type": "application/json",
   "X-Client-Secret": process.env.PI_STREAK_CLIENT_SECRET ?? "",
