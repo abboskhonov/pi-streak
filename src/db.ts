@@ -35,7 +35,7 @@ export async function getUserByGithubUsername(db: D1Database, githubUsername: st
 
 export async function getUserByDevicePubkey(db: D1Database, devicePubkey: string): Promise<User | null> {
   const result = await db
-    .prepare('SELECT u.* FROM users u JOIN user_devices d ON u.id = d.user_id WHERE d.device_pubkey = ?')
+    .prepare('SELECT u.* FROM users u JOIN user_devices d ON u.id = d.user_id WHERE TRIM(d.device_pubkey) = TRIM(?)')
     .bind(devicePubkey)
     .first<User>();
   return result ?? null;
