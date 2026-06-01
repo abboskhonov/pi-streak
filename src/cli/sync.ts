@@ -52,12 +52,12 @@ export function getGitUsername(): string | null {
 // Generate Ed25519 keypair using node:crypto
 function generateKeypair(): { publicKey: string; privateKey: string } {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
-    publicKeyEncoding: { type: 'spki', format: 'der' },
-    privateKeyEncoding: { type: 'pkcs8', format: 'der' }
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
   });
   return {
-    publicKey: Buffer.from(publicKey).toString('base64'),
-    privateKey: Buffer.from(privateKey).toString('base64'),
+    publicKey: publicKey,
+    privateKey: privateKey,
   };
 }
 

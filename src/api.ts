@@ -13,10 +13,15 @@ const MAX_STREAK = 3650;
 const MAX_ACTIVE_DAYS = 3650;
 const MAX_DAILY_COST = 100_000;
 
+function pemToDer(pem: string): Uint8Array {
+  const base64 = pem.replace(/-----BEGIN [^-]+-----/, '').replace(/-----END [^-]+-----/, '').replace(/\s/g, '');
+  return Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+}
+
 async function verifySyncSignature(devicePubkeyPem: string, payload: string, signature: string): Promise<boolean> {
   try {
     const encoder = new TextEncoder();
-    const pubKeyBytes = Uint8Array.from(atob(devicePubkeyPem), c => c.charCodeAt(0));
+    const pubKeyBytes = pemToDer(devicePubkeyPem);
     const pubKey = await crypto.subtle.importKey(
       'spki',
       pubKeyBytes as unknown as ArrayBuffer,
