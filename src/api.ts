@@ -25,9 +25,6 @@ app.use(cors({ origin: '*' }));
 app.get('/', (c) => c.text('pi-streak api'));
 
 app.post('/api/register', async (c) => {
-  const headerCheck = requireClientHeader(c);
-  if (headerCheck) return headerCheck;
-
   try {
     const body = await c.req.json<{ username?: string }>();
     const username = body?.username?.trim().toLowerCase();
