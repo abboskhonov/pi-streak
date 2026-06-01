@@ -27,39 +27,43 @@ async function main(): Promise<void> {
     const streaks = computeStreaks(new Set(daily.filter((day) => day.turns > 0).map((day) => day.day)));
     const activeDays = daily.filter((day) => day.turns > 0).length;
 
-    if (config && config.clientSecret) {
-      await syncFn(config.username, config.apiKey, config.clientSecret, daily, streaks.current, activeDays);
-    } else if (config && !config.clientSecret) {
-      const envSecret = process.env.PI_STREAK_CLIENT_SECRET;
-      if (envSecret) {
-        await syncFn(config.username, config.apiKey, envSecret, daily, streaks.current, activeDays);
-      } else {
-        console.error("  pi-streak: missing clientSecret in config");
-        console.error("  Set PI_STREAK_CLIENT_SECRET env var or delete ~/.pi/streak.json to re-register");
+    const username = getGitUsername();
+    if (!username) {
+      console.error("pi-streak: could not determine username. Set git config github.user or user.name");
+      process.exit(1);
+    }
+
+    const clientSecret = config?.clientSecret ?? process.env.PI_STREAK_CLIENT_SECRET ?? "";
+
+    async function trySync(apiKey: string, secret: string) {
+      await syncFn(username, apiKey, secret, daily, streaks.current, activeDays);
+    }
+
+    async function recover() {
+      if (!clientSecret) {
+        console.error("pi-streak: missing clientSecret. Set PI_STREAK_CLIENT_SECRET env var or re-register.");
         process.exit(1);
       }
-    } else {
-      const username = getGitUsername();
-      if (!username) {
-        console.error("pi-streak: could not determine username. Set git config github.user or user.name");
-        process.exit(1);
-      }
-      const envSecret = process.env.PI_STREAK_CLIENT_SECRET;
+      const { apiKey: newKey, clientSecret: newSecret } = await register(username, clientSecret);
+      saveConfig({ username, apiKey: newKey, clientSecret: newSecret });
+      console.log(`  Recovered @${username}. API key saved to ~/.pi/streak.json`);
+      await trySync(newKey, newSecret);
+    }
+
+    if (config?.apiKey && clientSecret) {
       try {
-        const { apiKey, clientSecret } = await register(username, envSecret);
-        saveConfig({ username, apiKey, clientSecret });
-        console.log(`  Registered @${username}. API key saved to ~/.pi/streak.json`);
-        await syncFn(username, apiKey, clientSecret, daily, streaks.current, activeDays);
+        await trySync(config.apiKey, clientSecret);
       } catch (err) {
         const msg = (err as Error).message;
-        if (msg.includes("Username taken")) {
-          console.error(`pi-streak: @${username} already exists. Set PI_STREAK_CLIENT_SECRET to recover or use a different username.`);
-          process.exit(1);
+        if (msg.includes("Invalid apiKey")) {
+          await recover();
         } else {
           console.error(`pi-streak: ${msg}`);
           process.exit(1);
         }
       }
+    } else {
+      await recover();
     }
     return;
   }
