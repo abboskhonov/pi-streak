@@ -2,6 +2,8 @@
 
 A Bun terminal contribution chart for the usage data recorded in [pi](https://pi.dev) agent session JSONL files. It renders a GitHub-style calendar with one square per day, colored by daily token activity.
 
+Now with a global leaderboard — sync your stats and compete.
+
 ## Install
 
 ```bash
@@ -11,50 +13,34 @@ pi-streak
 
 `pi-streak` requires [Bun](https://bun.sh/) and reads the session files at `~/.pi/agent/sessions/` by default.
 
-With Bun's package manager:
-
-```bash
-bun add --global pi-streak
-```
-
-Run without installing:
-
-```bash
-bunx pi-streak
-```
-
 ## Usage
 
 ```bash
+pi-streak                    # personal dashboard
 pi-streak --weeks 26
-pi-streak --dir /path/to/sessions
-pi-streak --today           # show today's activity
-pi-streak --models          # show model breakdown
-pi-streak --projects        # show project breakdown
+pi-streak --today            # today's activity
+pi-streak --models           # model breakdown
+pi-streak --projects         # project breakdown
 pi-streak --json
+
+pi-streak leaderboard        # global leaderboard (all-time)
+pi-streak leaderboard --week # weekly leaderboard
+pi-streak leaderboard --day  # daily leaderboard
+pi-streak leaderboard --month
+
+pi-streak sync             # sync today's stats to leaderboard
 ```
 
-For local development from this checkout:
+## API
+
+Cloudflare Workers + D1. Deploy:
 
 ```bash
-export PATH="$HOME/.bun/bin:$PATH"
-bun link
-pi-streak
+wrangler d1 create pi-streak
+# copy database_id into wrangler.jsonc
+wrangler d1 migrations apply pi-streak
+wrangler deploy
 ```
-
-## Metrics
-
-| Display | Source |
-| --- | --- |
-| Daily square | Assistant-message token totals for one local calendar day |
-| Color intensity | Relative token usage across days with activity |
-| Visible token total | Sum of token activity in the displayed week range |
-| Current streak | Consecutive calendar days with assistant activity ending today |
-| Longest streak | Longest consecutive run of calendar days with assistant activity |
-
-Use `--json` to access the extended totals, including task, peak-token, duration, cost, and token-category values.
-
-The CLI opens the session files read-only and does not modify pi state.
 
 ## License
 
