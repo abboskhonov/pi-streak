@@ -15,11 +15,11 @@ export type LeaderboardRow = {
   todayTokens: number;
 };
 
-export async function createUser(db: D1Database, username: string, apiKey: string): Promise<User> {
+export async function createUser(db: D1Database, username: string, apiKey: string, recoveryToken: string): Promise<User> {
   const now = Math.floor(Date.now() / 1000);
   const result = await db
-    .prepare('INSERT INTO users (username, api_key, created_at) VALUES (?, ?, ?) RETURNING *')
-    .bind(username, apiKey, now)
+    .prepare('INSERT INTO users (username, api_key, recovery_token, created_at) VALUES (?, ?, ?, ?) RETURNING *')
+    .bind(username, apiKey, recoveryToken, now)
     .first<User>();
   if (!result) throw new Error('Failed to create user');
   return result;
@@ -31,6 +31,10 @@ export async function getUserByUsername(db: D1Database, username: string): Promi
 
 export async function getUserByApiKey(db: D1Database, apiKey: string): Promise<{ id: number; username: string; api_key: string; created_at: number; last_sync: number } | null> {
   return await db.prepare('SELECT * FROM users WHERE api_key = ?').bind(apiKey).first<{ id: number; username: string; api_key: string; created_at: number; last_sync: number }>();
+}
+
+export async function getUserByRecoveryToken(db: D1Database, recoveryToken: string): Promise<User | null> {
+  return await db.prepare('SELECT * FROM users WHERE recovery_token = ?').bind(recoveryToken).first<User>();
 }
 
 export async function updateLastSync(db: D1Database, userId: number): Promise<void> {

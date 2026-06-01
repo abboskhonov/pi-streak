@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   }
 
   if (options.command === "sync") {
-    const { loadConfig, getGitUsername, saveConfig, register, sync: syncFn } = await import("./sync");
+    const { loadConfig, getGitUsername, saveConfig, register, rotateKey, sync: syncFn } = await import("./sync");
     const config = loadConfig();
     const { daily } = loadData(options.dirPath);
     const streaks = computeStreaks(new Set(daily.filter((day) => day.turns > 0).map((day) => day.day)));
@@ -33,48 +33,59 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    const clientSecret = config?.clientSecret ?? process.env.PI_STREAK_CLIENT_SECRET ?? "";
+    const clientSecret = process.env.PI_STREAK_CLIENT_SECRET ?? "";
 
-    async function trySync(apiKey: string, secret: string) {
-      await syncFn(username, apiKey, secret, daily, streaks.current, activeDays);
+    async function trySync(apiKey: string) {
+      await syncFn(username, apiKey, daily, streaks.current, activeDays);
     }
 
-    async function recover() {
+    async function doRegister() {
       if (!clientSecret) {
-        console.error("pi-streak: missing clientSecret. Set PI_STREAK_CLIENT_SECRET env var or re-register.");
+        console.error("pi-streak: missing clientSecret. Set PI_STREAK_CLIENT_SECRET env var.");
         process.exit(1);
       }
-      const { apiKey: newKey, clientSecret: newSecret } = await register(username, clientSecret);
-      saveConfig({ username, apiKey: newKey, clientSecret: newSecret });
+      const { apiKey: newKey, recoveryToken: newToken } = await register(username, clientSecret);
+      saveConfig({ username, apiKey: newKey, recoveryToken: newToken });
+      console.log(`  Registered @${username}. API key saved to ~/.pi/streak.json`);
+      await trySync(newKey);
+    }
+
+    async function doRecover() {
+      const recoveryToken = config?.recoveryToken;
+      if (!recoveryToken) {
+        console.error("pi-streak: API key invalid and no recovery token. Re-register with a new username.");
+        process.exit(1);
+      }
+      const { apiKey: newKey, recoveryToken: newToken } = await rotateKey("", recoveryToken);
+      saveConfig({ username, apiKey: newKey, recoveryToken: newToken });
       console.log(`  Recovered @${username}. API key saved to ~/.pi/streak.json`);
-      await trySync(newKey, newSecret);
+      await trySync(newKey);
     }
 
     if (config?.apiKey && clientSecret) {
       try {
-        await trySync(config.apiKey, clientSecret);
+        await trySync(config.apiKey);
       } catch (err) {
         const msg = (err as Error).message;
         if (msg.includes("Invalid apiKey")) {
-          await recover();
+          await doRecover();
         } else {
           console.error(`pi-streak: ${msg}`);
           process.exit(1);
         }
       }
     } else {
-      await recover();
+      await doRegister();
     }
     return;
   }
 
   if (options.command === "rank") {
-    const { fetchLeaderboard, getGitUsername, loadConfig } = await import("./sync");
-    const config = loadConfig();
+    const { fetchLeaderboard, getGitUsername } = await import("./sync");
     const period = options.rankPeriod ?? "alltime";
     const showAll = options.rankAll;
     const limit = showAll ? 50 : 20;
-    const { users, period: returnedPeriod } = await fetchLeaderboard(period, config?.clientSecret, limit);
+    const { users, period: returnedPeriod } = await fetchLeaderboard(period, limit);
     const muted = (text: string) => color("38;5;245", text);
     const dim = (text: string) => color("38;5;240", text);
     const highlight = (text: string) => color("1;38;5;255", text);
