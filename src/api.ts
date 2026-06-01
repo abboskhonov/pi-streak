@@ -176,8 +176,6 @@ app.post('/api/sync', async (c) => {
       const requests = Math.max(0, Math.floor(d.requests ?? 0));
       const cost = Math.max(0, d.cost ?? 0);
 
-      const total = inputTokens + outputTokens + cacheTokens;
-      if (total > 0 && (tokens < total * 0.9 || tokens > total * 1.1)) continue;
       if (cost > MAX_DAILY_COST) continue;
 
       await upsertDailyStats(c.env.DB, user.id, d.date, {
