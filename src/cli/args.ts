@@ -46,6 +46,12 @@ export function parseArgs(args: string[]): Options {
 
     if (argument === "rank") {
       options.command = "rank";
+      // Check next arg for period
+      const next = args[index + 1];
+      if (next && ["day", "week", "month", "alltime"].includes(next)) {
+        options.rankPeriod = next;
+        index += 1;
+      }
       continue;
     }
 
