@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "api",
+  "name": "pi-streak",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-01",
   // "compatibility_flags": [
