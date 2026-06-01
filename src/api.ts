@@ -86,7 +86,8 @@ app.post('/api/register', async (c) => {
     await addDevice(c.env.DB, user.id, devicePubkey);
     return c.json({ username: user.username, githubUsername: user.github_username }, 201);
   } catch (err) {
-    return c.json({ error: 'Database error. Is D1 configured?' }, 500);
+    console.error('register failed', err);
+    return c.json({ error: 'Registration failed' }, 500);
   }
 });
 
@@ -120,7 +121,8 @@ app.post('/api/authorize-device', async (c) => {
     await addDevice(c.env.DB, user.id, devicePubkey);
     return c.json({ username: user.username, githubUsername: user.github_username }, 200);
   } catch (err) {
-    return c.json({ error: 'Database error. Is D1 configured?' }, 500);
+    console.error('authorize-device failed', err);
+    return c.json({ error: 'Device authorization failed' }, 500);
   }
 });
 
@@ -209,7 +211,8 @@ app.post('/api/sync', async (c) => {
 
     return c.json({ ok: true, synced, username: user.username }, 200);
   } catch (err) {
-    return c.json({ error: 'Database error. Is D1 configured?' }, 500);
+    console.error('sync failed', err);
+    return c.json({ error: 'Sync failed' }, 500);
   }
 });
 

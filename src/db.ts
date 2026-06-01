@@ -52,9 +52,10 @@ export async function addDevice(db: D1Database, userId: number, devicePubkey: st
 }
 
 export async function updateDeviceLastSync(db: D1Database, userId: number, devicePubkey: string): Promise<void> {
+  const normalized = devicePubkey.replace(/\s/g, '');
   await db
     .prepare('UPDATE user_devices SET last_sync = ? WHERE user_id = ? AND device_pubkey = ?')
-    .bind(Math.floor(Date.now() / 1000), userId, devicePubkey)
+    .bind(Math.floor(Date.now() / 1000), userId, normalized)
     .run();
 }
 
