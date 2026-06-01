@@ -155,7 +155,6 @@ app.post('/api/sync', async (c) => {
     if (days.length > 366) return c.json({ error: 'Too many days. Max 366 per sync.' }, 400);
 
     const today = new Date().toISOString().slice(0, 10);
-    const userCreatedAt = new Date(user.created_at * 1000).toISOString().slice(0, 10);
     const globalStreak = Math.max(0, Math.floor(body?.streak ?? 0));
     const globalActiveDays = Math.max(0, Math.floor(body?.activeDays ?? 0));
 
@@ -166,7 +165,6 @@ app.post('/api/sync', async (c) => {
     for (const d of days) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date)) continue;
       if (d.date > today) continue;
-      if (d.date < userCreatedAt) continue;
       if (d.tokens > MAX_DAILY_TOKENS) continue;
 
       const tokens = Math.max(0, Math.floor(d.tokens ?? 0));

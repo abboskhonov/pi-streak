@@ -108,7 +108,7 @@ export async function sync(
   streak: number,
   activeDays: number
 ): Promise<void> {
-  const daysWithActivity = daily.filter((d) => d.tokens > 0);
+  const daysWithActivity = daily.filter((d) => d.tokens > 0 || d.turns > 0);
   if (daysWithActivity.length === 0) {
     console.log("  No activity found, nothing to sync.");
     return;
