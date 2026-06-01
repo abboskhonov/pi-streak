@@ -27,8 +27,17 @@ async function main(): Promise<void> {
     const streaks = computeStreaks(new Set(daily.filter((day) => day.turns > 0).map((day) => day.day)));
     const activeDays = daily.filter((day) => day.turns > 0).length;
 
-    if (config) {
-      await syncFn(config.username, config.apiKey, config.clientSecret ?? "", daily, streaks.current, activeDays);
+    if (config && config.clientSecret) {
+      await syncFn(config.username, config.apiKey, config.clientSecret, daily, streaks.current, activeDays);
+    } else if (config && !config.clientSecret) {
+      const envSecret = process.env.PI_STREAK_CLIENT_SECRET;
+      if (envSecret) {
+        await syncFn(config.username, config.apiKey, envSecret, daily, streaks.current, activeDays);
+      } else {
+        console.error("  pi-streak: missing clientSecret in config");
+        console.error("  Set PI_STREAK_CLIENT_SECRET env var or delete ~/.pi/streak.json to re-register");
+        process.exit(1);
+      }
     } else {
       const username = getGitUsername();
       if (!username) {
