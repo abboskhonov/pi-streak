@@ -32,7 +32,16 @@ app.post('/api/register', async (c) => {
     if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(username)) return c.json({ error: 'Username: lowercase alphanumeric, hyphens allowed' }, 400);
 
     const existing = await getUserByUsername(c.env.DB, username);
-    if (existing) return c.json({ error: 'Username taken' }, 409);
+    if (existing) {
+      const clientSecret = c.env.CLIENT_SECRET;
+      const clientHeader = c.req.header('x-client-secret');
+      if (clientSecret && clientHeader === clientSecret) {
+        const apiKey = crypto.randomUUID();
+        await c.env.DB.prepare('UPDATE users SET api_key = ? WHERE username = ?').bind(apiKey, username).run();
+        return c.json({ username, apiKey, clientSecret }, 200);
+      }
+      return c.json({ error: 'Username taken' }, 409);
+    }
 
     const apiKey = crypto.randomUUID();
     const user = await createUser(c.env.DB, username, apiKey);

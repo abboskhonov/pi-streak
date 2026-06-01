@@ -46,10 +46,12 @@ export function getGitUsername(): string | null {
   return null;
 }
 
-export async function register(username: string): Promise<{ apiKey: string; clientSecret: string }> {
+export async function register(username: string, clientSecret?: string): Promise<{ apiKey: string; clientSecret: string }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (clientSecret) headers["X-Client-Secret"] = clientSecret;
   const res = await fetch(`${apiBase}/api/register`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ username }),
   });
   const data = await res.json() as { apiKey?: string; clientSecret?: string; error?: string };

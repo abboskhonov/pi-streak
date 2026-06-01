@@ -44,14 +44,21 @@ async function main(): Promise<void> {
         console.error("pi-streak: could not determine username. Set git config github.user or user.name");
         process.exit(1);
       }
+      const envSecret = process.env.PI_STREAK_CLIENT_SECRET;
       try {
-        const { apiKey, clientSecret } = await register(username);
+        const { apiKey, clientSecret } = await register(username, envSecret);
         saveConfig({ username, apiKey, clientSecret });
         console.log(`  Registered @${username}. API key saved to ~/.pi/streak.json`);
         await syncFn(username, apiKey, clientSecret, daily, streaks.current, activeDays);
       } catch (err) {
-        console.error(`pi-streak: ${(err as Error).message}`);
-        process.exit(1);
+        const msg = (err as Error).message;
+        if (msg.includes("Username taken")) {
+          console.error(`pi-streak: @${username} already exists. Set PI_STREAK_CLIENT_SECRET to recover or use a different username.`);
+          process.exit(1);
+        } else {
+          console.error(`pi-streak: ${msg}`);
+          process.exit(1);
+        }
       }
     }
     return;
