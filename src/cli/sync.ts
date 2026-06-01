@@ -6,7 +6,7 @@ import type { DailyRow } from "./lib/types";
 
 const configDir = join(homedir(), ".pi");
 const configPath = join(configDir, "streak.json");
-const apiBase = "https://api.pi-streak.app";
+const apiBase = "https://api.telecraft.workers.dev";
 
 export type StreakConfig = {
   username: string;
