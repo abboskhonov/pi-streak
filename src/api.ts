@@ -13,47 +13,55 @@ app.use(cors({ origin: '*' }));
 app.get('/', (c) => c.text('pi-streak api'));
 
 app.post('/api/register', async (c) => {
-  const body = await c.req.json<{ username?: string }>();
-  const username = body?.username?.trim().toLowerCase();
-  if (!username || username.length < 2 || username.length > 39) return c.json({ error: 'Username must be 2-39 chars' }, 400);
-  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(username)) return c.json({ error: 'Username: lowercase alphanumeric, hyphens allowed' }, 400);
+  try {
+    const body = await c.req.json<{ username?: string }>();
+    const username = body?.username?.trim().toLowerCase();
+    if (!username || username.length < 2 || username.length > 39) return c.json({ error: 'Username must be 2-39 chars' }, 400);
+    if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(username)) return c.json({ error: 'Username: lowercase alphanumeric, hyphens allowed' }, 400);
 
-  const existing = await getUserByUsername(c.env.DB, username);
-  if (existing) return c.json({ error: 'Username taken' }, 409);
+    const existing = await getUserByUsername(c.env.DB, username);
+    if (existing) return c.json({ error: 'Username taken' }, 409);
 
-  const apiKey = crypto.randomUUID();
-  const user = await createUser(c.env.DB, username, apiKey);
-  return c.json({ username: user.username, apiKey: user.apiKey }, 201);
+    const apiKey = crypto.randomUUID();
+    const user = await createUser(c.env.DB, username, apiKey);
+    return c.json({ username: user.username, apiKey: user.apiKey }, 201);
+  } catch (err) {
+    return c.json({ error: 'Database error. Is D1 configured?' }, 500);
+  }
 });
 
 app.post('/api/sync', async (c) => {
-  const body = await c.req.json<{ apiKey?: string; username?: string; date?: string; tokens?: number; inputTokens?: number; outputTokens?: number; cacheTokens?: number; requests?: number; cost?: number; streak?: number; activeDays?: number; models?: { model: string; tokens: number; cost: number }[] }>();
+  try {
+    const body = await c.req.json<{ apiKey?: string; username?: string; date?: string; tokens?: number; inputTokens?: number; outputTokens?: number; cacheTokens?: number; requests?: number; cost?: number; streak?: number; activeDays?: number; models?: { model: string; tokens: number; cost: number }[] }>();
 
-  const apiKey = body?.apiKey;
-  if (!apiKey) return c.json({ error: 'Missing apiKey' }, 401);
+    const apiKey = body?.apiKey;
+    if (!apiKey) return c.json({ error: 'Missing apiKey' }, 401);
 
-  const user = await getUserByApiKey(c.env.DB, apiKey);
-  if (!user) return c.json({ error: 'Invalid apiKey' }, 401);
+    const user = await getUserByApiKey(c.env.DB, apiKey);
+    if (!user) return c.json({ error: 'Invalid apiKey' }, 401);
 
-  const date = body?.date;
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ error: 'Invalid date format (YYYY-MM-DD)' }, 400);
+    const date = body?.date;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ error: 'Invalid date format (YYYY-MM-DD)' }, 400);
 
-  await upsertDailyStats(c.env.DB, user.id, date, {
-    tokens: Math.max(0, Math.floor(body?.tokens ?? 0)),
-    inputTokens: Math.max(0, Math.floor(body?.inputTokens ?? 0)),
-    outputTokens: Math.max(0, Math.floor(body?.outputTokens ?? 0)),
-    cacheTokens: Math.max(0, Math.floor(body?.cacheTokens ?? 0)),
-    requests: Math.max(0, Math.floor(body?.requests ?? 0)),
-    cost: Math.max(0, body?.cost ?? 0),
-    streak: Math.max(0, Math.floor(body?.streak ?? 0)),
-    activeDays: Math.max(0, Math.floor(body?.activeDays ?? 0)),
-  });
+    await upsertDailyStats(c.env.DB, user.id, date, {
+      tokens: Math.max(0, Math.floor(body?.tokens ?? 0)),
+      inputTokens: Math.max(0, Math.floor(body?.inputTokens ?? 0)),
+      outputTokens: Math.max(0, Math.floor(body?.outputTokens ?? 0)),
+      cacheTokens: Math.max(0, Math.floor(body?.cacheTokens ?? 0)),
+      requests: Math.max(0, Math.floor(body?.requests ?? 0)),
+      cost: Math.max(0, body?.cost ?? 0),
+      streak: Math.max(0, Math.floor(body?.streak ?? 0)),
+      activeDays: Math.max(0, Math.floor(body?.activeDays ?? 0)),
+    });
 
-  for (const m of (body?.models ?? [])) {
-    await upsertModelStats(c.env.DB, user.id, date, m.model, Math.max(0, Math.floor(m.tokens ?? 0)), Math.max(0, m.cost ?? 0));
+    for (const m of (body?.models ?? [])) {
+      await upsertModelStats(c.env.DB, user.id, date, m.model, Math.max(0, Math.floor(m.tokens ?? 0)), Math.max(0, m.cost ?? 0));
+    }
+
+    return c.json({ ok: true, synced: date, username: user.username }, 200);
+  } catch (err) {
+    return c.json({ error: 'Database error. Is D1 configured?' }, 500);
   }
-
-  return c.json({ ok: true, synced: date, username: user.username }, 200);
 });
 
 app.get('/api/leaderboard', async (c) => {
