@@ -36,4 +36,10 @@
   //   "enabled": true,
   //   "head_sampling_rate": 1
   // }
+  "observability": {
+    "logs": {
+      "enabled": false,
+      "invocation_logs": true
+    }
+  }
 }
