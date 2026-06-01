@@ -34,7 +34,8 @@ async function main(): Promise<void> {
     }
 
     const clientSecret = process.env.PI_STREAK_CLIENT_SECRET ?? "";
-    const { publicKey: devicePubkey, privateKey } = getOrCreateKeypair();
+    const { publicKey: devicePubkeyRaw, privateKey } = getOrCreateKeypair();
+    const devicePubkey = devicePubkeyRaw.trim();
 
     async function trySync() {
       await syncFn(username, devicePubkey, privateKey, daily, streaks.current, activeDays);

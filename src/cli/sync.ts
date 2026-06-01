@@ -64,10 +64,10 @@ function generateKeypair(): { publicKey: string; privateKey: string } {
 export function getOrCreateKeypair(): { publicKey: string; privateKey: string } {
   if (existsSync(keyPath)) {
     const pem = readFileSync(keyPath, "utf-8");
-    const lines = pem.split("\n").filter(Boolean);
-    const [pubKeyLabel, pubKey, privKeyLabel, privKey] = lines;
-    if (pubKeyLabel === "PUBLIC:" && privKeyLabel === "PRIVATE:" && pubKey && privKey) {
-      return { publicKey: pubKey, privateKey: privKey };
+    const pubMatch = pem.match(/PUBLIC:\n([\s\S]*?)\nPRIVATE:/);
+    const privMatch = pem.match(/PRIVATE:\n([\s\S]*?)$/);
+    if (pubMatch && privMatch) {
+      return { publicKey: pubMatch[1].trim(), privateKey: privMatch[1].trim() };
     }
   }
   const keys = generateKeypair();
@@ -77,14 +77,14 @@ export function getOrCreateKeypair(): { publicKey: string; privateKey: string } 
 }
 
 function signPayload(privateKeyPem: string, payload: string): string {
-  const sig = sign(null, Buffer.from(payload, "utf-8"), Buffer.from(privateKeyPem, "base64"));
+  const sig = sign(null, Buffer.from(payload, "utf-8"), privateKeyPem);
   return sig.toString("base64");
 }
 
 export async function register(username: string, devicePubkey: string, clientSecret?: string, githubToken?: string): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (clientSecret) headers["X-Client-Secret"] = clientSecret;
-  const body: Record<string, string> = { username, devicePubkey };
+  const body: Record<string, string> = { username, devicePubkey: devicePubkey.trim() };
   if (githubToken) body.githubToken = githubToken;
   const res = await fetch(`${apiBase}/api/register`, {
     method: "POST",
@@ -103,7 +103,7 @@ export async function authorizeDevice(devicePubkey: string, githubToken: string,
   const res = await fetch(`${apiBase}/api/authorize-device`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ devicePubkey, githubToken }),
+    body: JSON.stringify({ devicePubkey: devicePubkey.trim(), githubToken }),
   });
   const data = await res.json() as { error?: string };
   if (!res.ok) {
