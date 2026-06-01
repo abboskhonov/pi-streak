@@ -9,6 +9,7 @@ Commands:
   rank        Show leaderboard (default: all-time, top 20)
               Use day, week, month, alltime for periods
               Use --all to show full list
+  @<username> Look up a user's profile and activity
   sync        Sync all stats to the leaderboard
 
 Options:
@@ -27,6 +28,7 @@ export function parseArgs(args: string[]): Options {
     command: "dashboard",
     rankPeriod: null,
     rankAll: false,
+    username: null,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -60,6 +62,12 @@ export function parseArgs(args: string[]): Options {
         options.rankPeriod = next;
         index += 1;
       }
+      continue;
+    }
+
+    if (argument.startsWith("@")) {
+      options.command = "user";
+      options.username = argument.slice(1).toLowerCase();
       continue;
     }
 

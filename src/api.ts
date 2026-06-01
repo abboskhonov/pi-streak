@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { createUser, getUserByUsername, getUserByDevicePubkey, getUserByGithubUsername, addDevice, upsertDailyStats, getLeaderboardAllTime, getLeaderboardDay, getLeaderboardWeek, getLeaderboardMonth, updateDeviceLastSync, countSyncRequestsInLastHour, logSyncRequest } from './db';
+import { createUser, getUserByUsername, getUserByDevicePubkey, getUserByGithubUsername, addDevice, upsertDailyStats, getLeaderboardAllTime, getLeaderboardDay, getLeaderboardWeek, getLeaderboardMonth, updateDeviceLastSync, countSyncRequestsInLastHour, logSyncRequest, getUserProfile } from './db';
 
 export interface CloudflareBindings {
   DB: D1Database;
@@ -210,6 +210,31 @@ app.get('/api/leaderboard', async (c) => {
   else rows = await getLeaderboardAllTime(c.env.DB, today, limit);
 
   return c.json({ period, generatedAt: new Date().toISOString(), count: rows.length, users: rows.map((r, i) => ({ rank: i + 1, username: r.username, tokens: r.tokens, streak: r.streak, activeDays: r.activeDays, today: r.todayTokens })) });
+});
+
+app.get('/api/user/:username', async (c) => {
+  try {
+    const username = c.req.param('username').trim().toLowerCase();
+    const today = new Date().toISOString().slice(0, 10);
+    const profile = await getUserProfile(c.env.DB, username, today);
+    if (!profile) {
+      return c.json({ error: 'User not found' }, 404);
+    }
+    return c.json({
+      username: profile.username,
+      githubUsername: profile.githubUsername,
+      createdAt: profile.createdAt,
+      rank: profile.rank,
+      lifetimeTokens: profile.lifetimeTokens,
+      streak: profile.streak,
+      activeDays: profile.activeDays,
+      todayTokens: profile.todayTokens,
+      daily: profile.daily,
+    }, 200);
+  } catch (err) {
+    console.error('user profile failed', err);
+    return c.json({ error: 'Failed to fetch user profile' }, 500);
+  }
 });
 
 export default app;

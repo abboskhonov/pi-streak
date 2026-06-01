@@ -2,9 +2,10 @@ export type Options = {
   dirPath: string;
   weeks: number;
   json: boolean;
-  command: "dashboard" | "today" | "rank" | "sync" | null;
+  command: "dashboard" | "today" | "rank" | "sync" | "user" | null;
   rankPeriod: string | null;
   rankAll: boolean;
+  username: string | null;
 };
 
 export type HourlyActivity = {

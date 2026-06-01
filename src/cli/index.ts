@@ -3,8 +3,8 @@
 import { existsSync } from "node:fs";
 import { parseArgs, usage } from "./args";
 import { loadData, loadTodayData, computeStreaks } from "./parser";
-import { renderDashboard, renderToday } from "./render";
-import { color } from "./util";
+import { renderDashboard, renderLeaderboard, renderToday, renderUserDashboard } from "./render";
+import { color, formatPath } from "./util";
 
 async function main(): Promise<void> {
   let options;
@@ -125,81 +125,29 @@ async function main(): Promise<void> {
     const showAll = options.rankAll;
     const limit = showAll ? 50 : 20;
     const { users, period: returnedPeriod } = await fetchLeaderboard(period, limit);
-    const muted = (text: string) => color("38;5;245", text);
-    const dim = (text: string) => color("38;5;240", text);
-    const highlight = (text: string) => color("1;38;5;255", text);
-    const accent = (text: string) => color("38;5;81", text);
-    const orange = (text: string) => color("38;5;208", text);
-    const purple = (text: string) => color("38;5;141", text);
-    const { formatTokens, padVisual, stripAnsi } = await import("./util");
-
     const currentUser = getGitUsername() ?? "";
-    const userInList = users.find((u) => u.username === currentUser);
-    const userRank = userInList?.rank ?? 0;
-    const showUser = userInList && !showAll && userRank > limit;
+    console.log(renderLeaderboard(users, returnedPeriod, currentUser, showAll, limit));
+    return;
+  }
 
-    const wRank = Math.max(String(users.length + (showUser ? 1 : 0)).length, "#".length);
-    const wUser = Math.max(...users.map((u) => `@${u.username}`.length + (u.username === currentUser ? 8 : 0)), "User".length) + 4;
-    const wTokens = Math.max(...users.map((u) => formatTokens(u.tokens).length), "Tokens".length) + 2;
-    const wStreak = Math.max(...users.map((u) => String(u.streak).length), "Streak".length) + 2;
-    const wToday = Math.max(...users.map((u) => formatTokens(u.today).length), "Today".length) + 2;
-    const wActive = Math.max(...users.map((u) => String(u.activeDays).length), "Days".length) + 2;
-    const totalWidth = wRank + wUser + wTokens + wStreak + wToday + wActive + 24;
-
-    console.log("");
-    const headerLeft = `${highlight("π leaderboard")}  ${muted(returnedPeriod)}`;
-    const headerRight = muted(`${users.length} participants`);
-    const headerPad = Math.max(1, totalWidth - stripAnsi(headerLeft).length - stripAnsi(headerRight).length);
-    console.log(`  ${headerLeft}${" ".repeat(headerPad)}${headerRight}`);
-    console.log("");
-
-    const hRank = muted("#".padStart(wRank));
-    const hUser = muted("User".padEnd(wUser));
-    const hTokens = muted("Tokens".padStart(wTokens));
-    const hStreak = muted("Streak".padStart(wStreak));
-    const hToday = muted("Today".padStart(wToday));
-    const hActive = muted("Days".padStart(wActive));
-    const headerRow = `  ${hRank}    ${hUser}    ${hTokens}    ${hStreak}    ${hToday}    ${hActive}`;
-    console.log(headerRow);
-    console.log(`  ${muted("─".repeat(totalWidth))}`);
-
-    function renderRow(u: typeof users[0]) {
-      const isYou = u.username === currentUser;
-      const rankStr = String(u.rank).padStart(wRank);
-      const userStr = isYou
-        ? `${highlight("@" + u.username)} ${purple("← you")}`
-        : `@${u.username}`;
-      const userPadded = padVisual(userStr, wUser);
-      const tokensStr = formatTokens(u.tokens).padStart(wTokens);
-      const streakStr = u.streak > 0 ? orange(`${u.streak}`.padStart(wStreak)) : dim("—".padStart(wStreak));
-      const todayStr = u.today > 0 ? accent(formatTokens(u.today).padStart(wToday)) : dim("—".padStart(wToday));
-      const activeStr = u.activeDays > 0 ? accent(`${u.activeDays}`.padStart(wActive)) : dim("—".padStart(wActive));
-
-      const styledRank = isYou ? highlight(rankStr) : dim(rankStr);
-      const styledUser = isYou ? userPadded : muted(padVisual(userStr, wUser));
-      const styledTokens = isYou ? highlight(tokensStr) : muted(tokensStr);
-      const styledStreak = isYou ? streakStr : muted(u.streak > 0 ? String(u.streak).padStart(wStreak) : "—".padStart(wStreak));
-      const styledToday = isYou ? todayStr : muted(u.today > 0 ? formatTokens(u.today).padStart(wToday) : "—".padStart(wToday));
-      const styledActive = isYou ? activeStr : muted(u.activeDays > 0 ? String(u.activeDays).padStart(wActive) : "—".padStart(wActive));
-
-      console.log(`  ${styledRank}    ${styledUser}    ${styledTokens}    ${styledStreak}    ${styledToday}    ${styledActive}`);
-      console.log(`  ${dim("─".repeat(totalWidth))}`);
+  if (options.command === "user" && options.username) {
+    try {
+      const { fetchUserProfile } = await import("./sync");
+      const profile = await fetchUserProfile(options.username);
+      const daily: { day: string; tokens: number; turns: number; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number }[] = profile.daily.map((d) => ({
+        day: d.date,
+        tokens: d.tokens,
+        turns: d.turns,
+        inputTokens: d.inputTokens,
+        outputTokens: d.outputTokens,
+        cacheTokens: d.cacheTokens,
+        cost: d.cost,
+      }));
+      console.log(renderUserDashboard(profile.username, options.weeks, daily, profile.streak, profile.lifetimeTokens, profile.rank));
+    } catch (err) {
+      console.error(`pi-streak: ${(err as Error).message}`);
+      process.exit(1);
     }
-
-    for (let i = 0; i < users.length; i++) {
-      renderRow(users[i]);
-    }
-
-    if (showUser) {
-      console.log(`  ${dim("...".padStart(wRank))}    ${dim("...".padEnd(wUser))}    ${dim("...".padStart(wTokens))}    ${dim("...".padStart(wStreak))}    ${dim("...".padStart(wToday))}    ${dim("...".padStart(wActive))}`);
-      console.log(`  ${dim("─".repeat(totalWidth))}`);
-      renderRow(userInList);
-    }
-
-    const orangeSquare = color("38;5;208", "■");
-    const blueSquare = color("38;5;81", "■");
-    console.log(`  ${orangeSquare} ${muted("streak")}    ${blueSquare} ${muted("today")}    ${blueSquare} ${muted("active days")}`);
-    console.log("");
     return;
   }
 
@@ -230,7 +178,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log(renderDashboard(options.dirPath, options.weeks, summary, daily, streaks.current));
+  console.log(renderDashboard(formatPath(options.dirPath), options.weeks, summary, daily, streaks.current));
 }
 
 main();

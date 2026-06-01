@@ -167,3 +167,64 @@ export async function getLeaderboardMonth(db: D1Database, date: string, limit: n
     return [];
   }
 }
+
+export type UserDailyStat = {
+  date: string;
+  tokens: number;
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheTokens: number;
+  cost: number;
+  streak: number;
+  activeDays: number;
+};
+
+export type UserProfile = {
+  username: string;
+  githubUsername: string | null;
+  createdAt: number;
+  lifetimeTokens: number;
+  streak: number;
+  activeDays: number;
+  todayTokens: number;
+  rank: number;
+  daily: UserDailyStat[];
+};
+
+export async function getUserProfile(db: D1Database, username: string, today: string): Promise<UserProfile | null> {
+  const user = await getUserByUsername(db, username);
+  if (!user) return null;
+
+  const dailyResult = await db
+    .prepare('SELECT date, tokens, requests as turns, input_tokens as inputTokens, output_tokens as outputTokens, cache_tokens as cacheTokens, cost, streak, active_days as activeDays FROM daily_stats WHERE user_id = ? ORDER BY date DESC')
+    .bind(user.id)
+    .all<UserDailyStat>();
+  const daily = dailyResult.results ?? [];
+
+  const todayRow = daily.find((d) => d.date === today);
+  const todayTokens = todayRow?.tokens ?? 0;
+
+  const lifetimeTokens = daily.reduce((sum, d) => sum + d.tokens, 0);
+  const streak = daily.length > 0 ? Math.max(...daily.map((d) => d.streak)) : 0;
+  const activeDays = daily.length > 0 ? Math.max(...daily.map((d) => d.activeDays)) : 0;
+
+  // Compute rank: count users with more total tokens
+  const rankResult = await db
+    .prepare(`SELECT COUNT(*) as count FROM (SELECT user_id FROM daily_stats GROUP BY user_id HAVING SUM(tokens) > ?) AS sub`)
+    .bind(lifetimeTokens)
+    .first<{ count: number }>();
+  const rank = (rankResult?.count ?? 0) + 1;
+
+  return {
+    username: user.username,
+    githubUsername: user.github_username,
+    createdAt: user.created_at,
+    lifetimeTokens,
+    streak,
+    activeDays,
+    todayTokens,
+    rank,
+    daily,
+  };
+}

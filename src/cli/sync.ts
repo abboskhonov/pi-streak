@@ -180,6 +180,41 @@ export async function fetchLeaderboard(period: string, limit = 50): Promise<{
   }>;
 }
 
+export async function fetchUserProfile(username: string): Promise<{
+  username: string;
+  githubUsername: string | null;
+  createdAt: number;
+  rank: number;
+  lifetimeTokens: number;
+  streak: number;
+  activeDays: number;
+  todayTokens: number;
+  daily: { date: string; tokens: number; turns: number; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number }[];
+}> {
+  const res = await fetch(`${apiBase}/api/user/${encodeURIComponent(username)}`);
+  if (!res.ok) {
+    let message: string;
+    try {
+      const data = await res.json() as { error?: string };
+      message = data.error ?? `Failed to fetch user (${res.status})`;
+    } catch {
+      message = `Failed to fetch user (${res.status})`;
+    }
+    throw new Error(message);
+  }
+  return res.json() as Promise<{
+    username: string;
+    githubUsername: string | null;
+    createdAt: number;
+    rank: number;
+    lifetimeTokens: number;
+    streak: number;
+    activeDays: number;
+    todayTokens: number;
+    daily: { date: string; tokens: number; turns: number; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number }[];
+  }>;
+}
+
 // GitHub token flow
 export async function getGithubToken(): Promise<string | null> {
   // Path 1: gh CLI

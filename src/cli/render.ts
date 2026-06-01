@@ -1,4 +1,4 @@
-import type { DailyRow, ModelRow, ProjectRow, SummaryRow, TodayData } from "./lib/types";
+import type { DailyRow, LeaderboardEntry, ModelRow, ProjectRow, SummaryRow, TodayData } from "./lib/types";
 import {
   color,
   compactNumber,
@@ -8,6 +8,8 @@ import {
   truncateModel,
   addDays,
   startOfToday,
+  padVisual,
+  stripAnsi,
 } from "./util";
 
 import { basename } from "node:path";
@@ -81,7 +83,7 @@ export function renderHeatmap(activity: Map<string, ActivityLevel>, weeks: numbe
 }
 
 export function renderDashboard(
-  dirPath: string,
+  label: string,
   weeks: number,
   summary: SummaryRow,
   daily: DailyRow[],
@@ -98,10 +100,40 @@ export function renderDashboard(
 
   const output = [
     "",
-    `  ${highlight("π pi activity")}  ${highlight(compactNumber(visibleTokens))} tokens / ${weeks} weeks  ${muted(formatPath(dirPath))}`,
+    `  ${highlight("π pi activity")}  ${highlight(compactNumber(visibleTokens))} tokens / ${weeks} weeks  ${muted(label)}`,
     "",
     ...renderHeatmap(activity, weeks),
     `  ${visibleActiveDays} active days  ${muted("|")}  ${currentStreak} day streak  ${muted("|")}  ${compactNumber(summary.lifetimeTokens)} all-time`,
+    "",
+  ];
+
+  return output.join("\n");
+}
+
+export function renderUserDashboard(
+  username: string,
+  weeks: number,
+  daily: DailyRow[],
+  currentStreak: number,
+  lifetimeTokens: number,
+  rank: number,
+): string {
+  const activity = new Map(daily.map((day) => [day.day, { tokens: day.tokens, turns: day.turns }]));
+  const today = startOfToday();
+  const firstSunday = addDays(addDays(today, -today.getDay()), -(weeks - 1) * 7);
+  const visibleDays = daily.filter((day) => day.day >= localDay(firstSunday) && day.day <= localDay(today));
+  const visibleTokens = visibleDays.reduce((sum, day) => sum + day.tokens, 0);
+  const visibleActiveDays = visibleDays.filter((day) => day.turns > 0).length;
+  const muted = (text: string) => color("38;5;245", text);
+  const highlight = (text: string) => color("1;38;5;255", text);
+  const accent = (text: string) => color("38;5;81", text);
+
+  const output = [
+    "",
+    `  ${highlight("π pi activity")}  ${highlight("@" + username)}  ${muted("rank " + rank)}`,
+    "",
+    ...renderHeatmap(activity, weeks),
+    `  ${visibleActiveDays} active days  ${muted("|")}  ${currentStreak} day streak  ${muted("|")}  ${compactNumber(lifetimeTokens)} all-time`,
     "",
   ];
 
@@ -297,6 +329,100 @@ export function renderModels(models: ModelRow[]): string {
   }
 
   lines.push("");
+  return lines.join("\n");
+}
+
+export function renderLeaderboard(
+  users: LeaderboardEntry[],
+  period: string,
+  currentUser: string,
+  showAll: boolean,
+  limit: number,
+): string {
+  const muted = (text: string) => color("38;5;245", text);
+  const dim = (text: string) => color("38;5;240", text);
+  const highlight = (text: string) => color("1;38;5;255", text);
+  const accent = (text: string) => color("38;5;81", text);
+  const orange = (text: string) => color("38;5;208", text);
+  const purple = (text: string) => color("38;5;141", text);
+
+  const userInList = users.find((u) => u.username === currentUser);
+  const userRank = userInList?.rank ?? 0;
+  const showUser = userInList && !showAll && userRank > limit;
+
+  const wRank = Math.max(String(users.length + (showUser ? 1 : 0)).length, "#".length);
+  const wUser = Math.max(...users.map((u) => `@${u.username}`.length + (u.username === currentUser ? 8 : 0)), "User".length) + 4;
+  const wTokens = Math.max(...users.map((u) => formatTokens(u.tokens).length), "Tokens".length) + 2;
+  const wStreak = Math.max(...users.map((u) => String(u.streak).length), "Streak".length) + 2;
+  const wToday = Math.max(...users.map((u) => formatTokens(u.today).length), "Today".length) + 2;
+  const wActive = Math.max(...users.map((u) => String(u.activeDays).length), "Days".length) + 2;
+
+  const terminalWidth = process.stdout?.columns ?? 120;
+  const contentWidth = wRank + wUser + wTokens + wStreak + wToday + wActive;
+  const minGap = 1;
+  const baseGap = 4;
+  const preferredWidth = 2 + contentWidth + 5 * baseGap;
+
+  const gap = terminalWidth >= preferredWidth ? baseGap : minGap;
+  const totalWidth = contentWidth + 5 * gap;
+
+  const lines: string[] = [""];
+
+  const headerLeft = `${highlight("π leaderboard")}  ${muted(period)}`;
+  const headerRight = muted(`${users.length} participants`);
+  const headerLeftLen = stripAnsi(headerLeft).length;
+  const headerRightLen = stripAnsi(headerRight).length;
+  const headerPad = Math.max(1, totalWidth - headerLeftLen - headerRightLen);
+  lines.push(`  ${headerLeft}${" ".repeat(headerPad)}${headerRight}`);
+  lines.push("");
+
+  const hRank = muted("#".padStart(wRank));
+  const hUser = muted("User".padEnd(wUser));
+  const hTokens = muted("Tokens".padStart(wTokens));
+  const hStreak = muted("Streak".padStart(wStreak));
+  const hToday = muted("Today".padStart(wToday));
+  const hActive = muted("Days".padStart(wActive));
+  lines.push(`  ${hRank}${" ".repeat(gap)}${hUser}${" ".repeat(gap)}${hTokens}${" ".repeat(gap)}${hStreak}${" ".repeat(gap)}${hToday}${" ".repeat(gap)}${hActive}`);
+  lines.push(`  ${muted("─".repeat(totalWidth))}`);
+
+  function renderRow(u: LeaderboardEntry) {
+    const isYou = u.username === currentUser;
+    const rankStr = String(u.rank).padStart(wRank);
+    const userStr = isYou
+      ? `${highlight("@" + u.username)} ${purple("← you")}`
+      : `@${u.username}`;
+    const userPadded = padVisual(userStr, wUser);
+    const tokensStr = formatTokens(u.tokens).padStart(wTokens);
+    const streakStr = u.streak > 0 ? orange(`${u.streak}`.padStart(wStreak)) : dim("—".padStart(wStreak));
+    const todayStr = u.today > 0 ? accent(formatTokens(u.today).padStart(wToday)) : dim("—".padStart(wToday));
+    const activeStr = u.activeDays > 0 ? accent(`${u.activeDays}`.padStart(wActive)) : dim("—".padStart(wActive));
+
+    const styledRank = isYou ? highlight(rankStr) : dim(rankStr);
+    const styledUser = isYou ? userPadded : muted(padVisual(userStr, wUser));
+    const styledTokens = isYou ? highlight(tokensStr) : muted(tokensStr);
+    const styledStreak = isYou ? streakStr : muted(u.streak > 0 ? String(u.streak).padStart(wStreak) : "—".padStart(wStreak));
+    const styledToday = isYou ? todayStr : muted(u.today > 0 ? formatTokens(u.today).padStart(wToday) : "—".padStart(wToday));
+    const styledActive = isYou ? activeStr : muted(u.activeDays > 0 ? String(u.activeDays).padStart(wActive) : "—".padStart(wActive));
+
+    lines.push(`  ${styledRank}${" ".repeat(gap)}${styledUser}${" ".repeat(gap)}${styledTokens}${" ".repeat(gap)}${styledStreak}${" ".repeat(gap)}${styledToday}${" ".repeat(gap)}${styledActive}`);
+    lines.push(`  ${dim("─".repeat(totalWidth))}`);
+  }
+
+  for (let i = 0; i < users.length; i++) {
+    renderRow(users[i]);
+  }
+
+  if (showUser) {
+    lines.push(`  ${dim("...".padStart(wRank))}${" ".repeat(gap)}${dim("...".padEnd(wUser))}${" ".repeat(gap)}${dim("...".padStart(wTokens))}${" ".repeat(gap)}${dim("...".padStart(wStreak))}${" ".repeat(gap)}${dim("...".padStart(wToday))}${" ".repeat(gap)}${dim("...".padStart(wActive))}`);
+    lines.push(`  ${dim("─".repeat(totalWidth))}`);
+    renderRow(userInList);
+  }
+
+  const orangeSquare = color("38;5;208", "■");
+  const blueSquare = color("38;5;81", "■");
+  lines.push(`  ${orangeSquare} ${muted("streak")}    ${blueSquare} ${muted("today")}    ${blueSquare} ${muted("active days")}`);
+  lines.push("");
+
   return lines.join("\n");
 }
 
