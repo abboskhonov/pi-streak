@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { createHmac, generateKeyPairSync, sign, verify } from "node:crypto";
+import { generateKeyPairSync, sign } from "node:crypto";
 import type { DailyRow } from "./lib/types";
 
 const configDir = join(homedir(), ".pi");
@@ -10,15 +10,8 @@ const configPath = join(configDir, "streak.json");
 const keyPath = join(configDir, "streak.pem");
 const apiBase = process.env.PI_STREAK_API_URL ?? "https://pi-streak.telecraft.workers.dev";
 
-function getClientSecret(): string {
-  return process.env.PI_STREAK_CLIENT_SECRET ?? "";
-}
-
 function makeHeaders(): Record<string, string> {
-  return {
-    "Content-Type": "application/json",
-    "X-Client-Secret": getClientSecret(),
-  };
+  return { "Content-Type": "application/json" };
 }
 
 export type StreakConfig = {
@@ -81,14 +74,12 @@ function signPayload(privateKeyPem: string, payload: string): string {
   return sig.toString("base64");
 }
 
-export async function register(username: string, devicePubkey: string, clientSecret?: string, githubToken?: string): Promise<void> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (clientSecret) headers["X-Client-Secret"] = clientSecret;
+export async function register(username: string, devicePubkey: string, githubToken?: string): Promise<void> {
   const body: Record<string, string> = { username, devicePubkey: devicePubkey.trim() };
   if (githubToken) body.githubToken = githubToken;
   const res = await fetch(`${apiBase}/api/register`, {
     method: "POST",
-    headers,
+    headers: makeHeaders(),
     body: JSON.stringify(body),
   });
   const data = await res.json() as { error?: string; needsAuthorization?: boolean };
@@ -97,12 +88,10 @@ export async function register(username: string, devicePubkey: string, clientSec
   }
 }
 
-export async function authorizeDevice(devicePubkey: string, githubToken: string, clientSecret?: string): Promise<void> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (clientSecret) headers["X-Client-Secret"] = clientSecret;
+export async function authorizeDevice(devicePubkey: string, githubToken: string): Promise<void> {
   const res = await fetch(`${apiBase}/api/authorize-device`, {
     method: "POST",
-    headers,
+    headers: makeHeaders(),
     body: JSON.stringify({ devicePubkey: devicePubkey.trim(), githubToken }),
   });
   const data = await res.json() as { error?: string };
@@ -180,10 +169,7 @@ export async function fetchLeaderboard(period: string, limit = 50): Promise<{
   count: number;
   users: { rank: number; username: string; tokens: number; streak: number; activeDays: number; today: number }[];
 }> {
-  const clientSecret = process.env.PI_STREAK_CLIENT_SECRET ?? "";
-  const res = await fetch(`${apiBase}/api/leaderboard?period=${period}&limit=${limit}`, {
-    headers: clientSecret ? { "X-Client-Secret": clientSecret } : undefined,
-  });
+  const res = await fetch(`${apiBase}/api/leaderboard?period=${period}&limit=${limit}`);
   if (!res.ok) {
     throw new Error(`Failed to fetch leaderboard (${res.status})`);
   }

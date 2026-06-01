@@ -33,7 +33,6 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    const clientSecret = process.env.PI_STREAK_CLIENT_SECRET ?? "";
     const { publicKey: devicePubkeyRaw, privateKey } = getOrCreateKeypair();
     const devicePubkey = devicePubkeyRaw.trim();
 
@@ -42,10 +41,6 @@ async function main(): Promise<void> {
     }
 
     async function doRegister() {
-      if (!clientSecret) {
-        console.error("pi-streak: missing clientSecret. Set PI_STREAK_CLIENT_SECRET env var.");
-        process.exit(1);
-      }
       let githubToken = (await getGithubToken()) ?? undefined;
       if (!githubToken) {
         const readline = require("readline");
@@ -59,7 +54,7 @@ async function main(): Promise<void> {
         if (token.trim()) githubToken = token.trim();
       }
       try {
-        await register(username, devicePubkey, clientSecret, githubToken);
+        await register(username, devicePubkey, githubToken);
         saveConfig({ username, devicePubkey, githubToken });
         console.log(`  Registered @${username}. Device key saved to ~/.pi/streak.json`);
         await trySync();
@@ -96,7 +91,7 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       try {
-        await authorizeDevice(devicePubkey, githubToken, clientSecret);
+        await authorizeDevice(devicePubkey, githubToken);
         saveConfig({ username, devicePubkey, githubToken });
         console.log(`  Authorized @${username} on this device.`);
         await trySync();

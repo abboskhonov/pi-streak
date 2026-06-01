@@ -37,15 +37,6 @@ async function verifySyncSignature(devicePubkeyPem: string, payload: string, sig
   }
 }
 
-function requireClientHeader(c: any) {
-  const secret = c.env.CLIENT_SECRET;
-  const client = c.req.header('x-client-secret');
-  if (!secret || client !== secret) {
-    return c.json({ error: 'Invalid client' }, 403);
-  }
-  return null;
-}
-
 const app = new Hono<{ Bindings: CloudflareBindings }>();
 
 app.use(cors({ origin: '*' }));
@@ -53,9 +44,6 @@ app.use(cors({ origin: '*' }));
 app.get('/', (c) => c.text('pi-streak api'));
 
 app.post('/api/register', async (c) => {
-  const headerCheck = requireClientHeader(c);
-  if (headerCheck) return headerCheck;
-
   try {
     const body = await c.req.json<{ username?: string; devicePubkey?: string; githubToken?: string }>();
     const username = body?.username?.trim().toLowerCase();
@@ -92,9 +80,6 @@ app.post('/api/register', async (c) => {
 });
 
 app.post('/api/authorize-device', async (c) => {
-  const headerCheck = requireClientHeader(c);
-  if (headerCheck) return headerCheck;
-
   try {
     const body = await c.req.json<{ devicePubkey?: string; githubToken?: string }>();
     const devicePubkey = body?.devicePubkey?.trim();
@@ -127,9 +112,6 @@ app.post('/api/authorize-device', async (c) => {
 });
 
 app.post('/api/sync', async (c) => {
-  const headerCheck = requireClientHeader(c);
-  if (headerCheck) return headerCheck;
-
   try {
     const body = await c.req.json<{
       username?: string;
