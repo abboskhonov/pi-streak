@@ -317,17 +317,20 @@ function renderHeatmap(activity: Map<string, DayActivity>, weeks: number): strin
   const thisSunday = addDays(today, -today.getDay());
   const firstSunday = addDays(thisSunday, -(weeks - 1) * 7);
   const thresholds = activityThresholds(activity);
-  const monthLine = Array.from({ length: weeks }, () => " ");
+  const monthLine = Array.from({ length: weeks + 2 }, () => " ");
   let lastMonth = -1;
 
   for (let week = 0; week < weeks; week += 1) {
     const date = addDays(firstSunday, week * 7);
-    if (date.getMonth() !== lastMonth) {
-      const label = date.toLocaleString("en", { month: "short" });
+    const saturday = addDays(date, 6);
+    const containsToday = date <= today && today <= saturday;
+    const labelDate = containsToday && date.getMonth() !== saturday.getMonth() ? saturday : date;
+    if (labelDate.getMonth() !== lastMonth) {
+      const label = labelDate.toLocaleString("en", { month: "short" });
       for (let offset = 0; offset < label.length && week + offset < monthLine.length; offset += 1) {
         monthLine[week + offset] = label[offset];
       }
-      lastMonth = date.getMonth();
+      lastMonth = labelDate.getMonth();
     }
   }
 
