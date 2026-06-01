@@ -24,7 +24,7 @@ app.post('/api/register', async (c) => {
 
     const apiKey = crypto.randomUUID();
     const user = await createUser(c.env.DB, username, apiKey);
-    return c.json({ username: user.username, apiKey: user.apiKey }, 201);
+    return c.json({ username: user.username, apiKey: user.api_key }, 201);
   } catch (err) {
     return c.json({ error: 'Database error. Is D1 configured?' }, 500);
   }

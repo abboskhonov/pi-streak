@@ -3,8 +3,8 @@ import type { D1Database } from '@cloudflare/workers-types';
 export type User = {
   id: number;
   username: string;
-  apiKey: string;
-  createdAt: number;
+  api_key: string;
+  created_at: number;
 };
 
 export type LeaderboardRow = {
@@ -28,8 +28,8 @@ export async function getUserByUsername(db: D1Database, username: string): Promi
   return await db.prepare('SELECT * FROM users WHERE username = ?').bind(username).first<User>();
 }
 
-export async function getUserByApiKey(db: D1Database, apiKey: string): Promise<User | null> {
-  return await db.prepare('SELECT * FROM users WHERE api_key = ?').bind(apiKey).first<User>();
+export async function getUserByApiKey(db: D1Database, apiKey: string): Promise<{ id: number; username: string; api_key: string; created_at: number } | null> {
+  return await db.prepare('SELECT * FROM users WHERE api_key = ?').bind(apiKey).first<{ id: number; username: string; api_key: string; created_at: number }>();
 }
 
 export async function upsertDailyStats(

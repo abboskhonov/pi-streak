@@ -25,10 +25,10 @@
     {
       "binding": "DB",
       "database_name": "pi-streak",
-      "database_id": ""
+      "database_id": "7cbfa3c9-b7bd-453f-a618-2b3f9cb2c455"
     }
   ],
-  "migrations_dir": "migrations",
+
   // "ai": {
   //   "binding": "AI"
   // },
