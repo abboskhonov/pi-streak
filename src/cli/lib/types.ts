@@ -2,11 +2,8 @@ export type Options = {
   dirPath: string;
   weeks: number;
   json: boolean;
-  models: boolean;
-  projects: boolean;
-  today: boolean;
-  sync: boolean;
-  leaderboard: string | null;
+  command: "dashboard" | "today" | "rank" | "sync" | null;
+  rankPeriod: string | null;
 };
 
 export type HourlyActivity = {
@@ -53,11 +50,19 @@ export type DailyRow = {
   day: string;
   tokens: number;
   turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheTokens: number;
+  cost: number;
 };
 
 export type DayActivity = {
   tokens: number;
   turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheTokens: number;
+  cost: number;
 };
 
 export type ModelRow = {
@@ -110,6 +115,7 @@ export type LeaderboardEntry = {
   tokens: number;
   streak: number;
   activeDays: number;
+  today: number;
 };
 
 export type SyncPayload = {

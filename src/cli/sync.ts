@@ -6,7 +6,11 @@ import type { DailyRow } from "./lib/types";
 
 const configDir = join(homedir(), ".pi");
 const configPath = join(configDir, "streak.json");
-const apiBase = "https://api.telecraft.workers.dev";
+const apiBase = process.env.PI_STREAK_API_URL ?? "https://api.telecraft.workers.dev";
+const clientHeaders = {
+  "Content-Type": "application/json",
+  "X-Client-Secret": process.env.PI_STREAK_CLIENT_SECRET ?? "",
+};
 
 export type StreakConfig = {
   username: string;
@@ -38,7 +42,7 @@ export function getGitUsername(): string | null {
 export async function register(username: string): Promise<string> {
   const res = await fetch(`${apiBase}/api/register`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: clientHeaders,
     body: JSON.stringify({ username }),
   });
   const data = await res.json() as { apiKey?: string; error?: string };
@@ -56,43 +60,43 @@ export async function sync(
   streak: number,
   activeDays: number
 ): Promise<void> {
-  const today = new Date().toISOString().slice(0, 10);
-  const todayData = daily.find((d) => d.day === today);
-
-  if (!todayData || todayData.tokens === 0) {
-    console.log("  No activity today, nothing to sync.");
+  const daysWithActivity = daily.filter((d) => d.tokens > 0);
+  if (daysWithActivity.length === 0) {
+    console.log("  No activity found, nothing to sync.");
     return;
   }
 
   const res = await fetch(`${apiBase}/api/sync`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: clientHeaders,
     body: JSON.stringify({
       apiKey,
       username,
-      date: today,
-      tokens: todayData.tokens,
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheTokens: 0,
-      requests: todayData.turns,
-      cost: 0,
       streak,
       activeDays,
+      days: daysWithActivity.map((d) => ({
+        date: d.day,
+        tokens: d.tokens,
+        requests: d.turns,
+        inputTokens: d.inputTokens,
+        outputTokens: d.outputTokens,
+        cacheTokens: d.cacheTokens,
+        cost: d.cost,
+      })),
     }),
   });
 
-  const data = await res.json() as { ok?: boolean; error?: string; synced?: string };
+  const data = await res.json() as { ok?: boolean; synced?: number; error?: string };
   if (!res.ok) {
     throw new Error(data.error ?? `Sync failed (${res.status})`);
   }
-  console.log(`  Synced ${data.synced ?? today} for @${username}`);
+  console.log(`  Synced ${data.synced ?? 0} days for @${username}`);
 }
 
 export async function fetchLeaderboard(period: string): Promise<{
   period: string;
   count: number;
-  users: { rank: number; username: string; tokens: number; streak: number; activeDays: number }[];
+  users: { rank: number; username: string; tokens: number; streak: number; activeDays: number; today: number }[];
 }> {
   const res = await fetch(`${apiBase}/api/leaderboard?period=${period}&limit=50`);
   if (!res.ok) {
@@ -101,6 +105,6 @@ export async function fetchLeaderboard(period: string): Promise<{
   return res.json() as Promise<{
     period: string;
     count: number;
-    users: { rank: number; username: string; tokens: number; streak: number; activeDays: number }[];
+    users: { rank: number; username: string; tokens: number; streak: number; activeDays: number; today: number }[];
   }>;
 }

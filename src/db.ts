@@ -12,6 +12,7 @@ export type LeaderboardRow = {
   tokens: number;
   streak: number;
   activeDays: number;
+  todayTokens: number;
 };
 
 export async function createUser(db: D1Database, username: string, apiKey: string): Promise<User> {
@@ -28,8 +29,12 @@ export async function getUserByUsername(db: D1Database, username: string): Promi
   return await db.prepare('SELECT * FROM users WHERE username = ?').bind(username).first<User>();
 }
 
-export async function getUserByApiKey(db: D1Database, apiKey: string): Promise<{ id: number; username: string; api_key: string; created_at: number } | null> {
-  return await db.prepare('SELECT * FROM users WHERE api_key = ?').bind(apiKey).first<{ id: number; username: string; api_key: string; created_at: number }>();
+export async function getUserByApiKey(db: D1Database, apiKey: string): Promise<{ id: number; username: string; api_key: string; created_at: number; last_sync: number } | null> {
+  return await db.prepare('SELECT * FROM users WHERE api_key = ?').bind(apiKey).first<{ id: number; username: string; api_key: string; created_at: number; last_sync: number }>();
+}
+
+export async function updateLastSync(db: D1Database, userId: number): Promise<void> {
+  await db.prepare('UPDATE users SET last_sync = ? WHERE id = ?').bind(Math.floor(Date.now() / 1000), userId).run();
 }
 
 export async function upsertDailyStats(
@@ -72,11 +77,11 @@ export async function upsertModelStats(db: D1Database, userId: number, date: str
     .run();
 }
 
-export async function getLeaderboardAllTime(db: D1Database, limit: number = 50): Promise<LeaderboardRow[]> {
+export async function getLeaderboardAllTime(db: D1Database, date: string, limit: number = 50): Promise<LeaderboardRow[]> {
   try {
     const result = await db
-      .prepare('SELECT u.username, SUM(d.tokens) as tokens, MAX(d.streak) as streak, MAX(d.active_days) as activeDays FROM users u JOIN daily_stats d ON u.id = d.user_id GROUP BY u.id ORDER BY tokens DESC LIMIT ?')
-      .bind(limit)
+      .prepare(`SELECT u.username, SUM(d.tokens) as tokens, MAX(d.streak) as streak, MAX(d.active_days) as activeDays, COALESCE(today.tokens, 0) as todayTokens FROM users u JOIN daily_stats d ON u.id = d.user_id LEFT JOIN daily_stats today ON today.user_id = u.id AND today.date = ? GROUP BY u.id ORDER BY tokens DESC LIMIT ?`)
+      .bind(date, limit)
       .all<LeaderboardRow>();
     return result.results ?? [];
   } catch {
@@ -87,7 +92,7 @@ export async function getLeaderboardAllTime(db: D1Database, limit: number = 50):
 export async function getLeaderboardDay(db: D1Database, date: string, limit: number = 50): Promise<LeaderboardRow[]> {
   try {
     const result = await db
-      .prepare('SELECT u.username, d.tokens, d.streak, d.active_days as activeDays FROM users u JOIN daily_stats d ON u.id = d.user_id WHERE d.date = ? ORDER BY d.tokens DESC LIMIT ?')
+      .prepare('SELECT u.username, d.tokens, d.streak, d.active_days as activeDays, d.tokens as todayTokens FROM users u JOIN daily_stats d ON u.id = d.user_id WHERE d.date = ? ORDER BY d.tokens DESC LIMIT ?')
       .bind(date, limit)
       .all<LeaderboardRow>();
     return result.results ?? [];
@@ -99,8 +104,8 @@ export async function getLeaderboardDay(db: D1Database, date: string, limit: num
 export async function getLeaderboardWeek(db: D1Database, date: string, limit: number = 50): Promise<LeaderboardRow[]> {
   try {
     const result = await db
-      .prepare('SELECT u.username, SUM(d.tokens) as tokens, MAX(d.streak) as streak, MAX(d.active_days) as activeDays FROM users u JOIN daily_stats d ON u.id = d.user_id WHERE d.date BETWEEN date(?, "-6 days") AND ? GROUP BY u.id ORDER BY tokens DESC LIMIT ?')
-      .bind(date, date, limit)
+      .prepare(`SELECT u.username, SUM(d.tokens) as tokens, MAX(d.streak) as streak, MAX(d.active_days) as activeDays, COALESCE(today.tokens, 0) as todayTokens FROM users u JOIN daily_stats d ON u.id = d.user_id LEFT JOIN daily_stats today ON today.user_id = u.id AND today.date = ? WHERE d.date BETWEEN date(?, "-6 days") AND ? GROUP BY u.id ORDER BY tokens DESC LIMIT ?`)
+      .bind(date, date, date, limit)
       .all<LeaderboardRow>();
     return result.results ?? [];
   } catch {
@@ -111,8 +116,8 @@ export async function getLeaderboardWeek(db: D1Database, date: string, limit: nu
 export async function getLeaderboardMonth(db: D1Database, date: string, limit: number = 50): Promise<LeaderboardRow[]> {
   try {
     const result = await db
-      .prepare('SELECT u.username, SUM(d.tokens) as tokens, MAX(d.streak) as streak, MAX(d.active_days) as activeDays FROM users u JOIN daily_stats d ON u.id = d.user_id WHERE d.date BETWEEN date(?, "-29 days") AND ? GROUP BY u.id ORDER BY tokens DESC LIMIT ?')
-      .bind(date, date, limit)
+      .prepare(`SELECT u.username, SUM(d.tokens) as tokens, MAX(d.streak) as streak, MAX(d.active_days) as activeDays, COALESCE(today.tokens, 0) as todayTokens FROM users u JOIN daily_stats d ON u.id = d.user_id LEFT JOIN daily_stats today ON today.user_id = u.id AND today.date = ? WHERE d.date BETWEEN date(?, "-29 days") AND ? GROUP BY u.id ORDER BY tokens DESC LIMIT ?`)
+      .bind(date, date, date, limit)
       .all<LeaderboardRow>();
     return result.results ?? [];
   } catch {
