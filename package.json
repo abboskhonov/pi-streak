@@ -1,6 +1,6 @@
 {
   "name": "pi-streak",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "type": "module",
   "description": "pi-streak leaderboard API + CLI",
   "main": "src/index.ts",
@@ -25,8 +25,7 @@
   "files": [
     "src",
     "bin.cjs",
-    "wrangler.jsonc",
-    "schema.sql"
+    "wrangler.jsonc"
   ],
   "license": "MIT",
   "engines": {

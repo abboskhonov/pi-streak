@@ -18,17 +18,17 @@ pi-streak
 ```bash
 pi-streak                    # personal dashboard
 pi-streak --weeks 26
-pi-streak --today            # today's activity
-pi-streak --models           # model breakdown
-pi-streak --projects         # project breakdown
+pi-streak today              # today's activity
 pi-streak --json
 
-pi-streak leaderboard        # global leaderboard (all-time)
-pi-streak leaderboard --week # weekly leaderboard
-pi-streak leaderboard --day  # daily leaderboard
-pi-streak leaderboard --month
+pi-streak rank               # global leaderboard (all-time, top 20)
+pi-streak rank day           # daily leaderboard
+pi-streak rank week          # weekly leaderboard
+pi-streak rank month         # monthly leaderboard
+pi-streak rank alltime --all # full all-time leaderboard
 
-pi-streak sync             # sync today's stats to leaderboard
+pi-streak @username          # synced user dashboard
+pi-streak sync               # sync all local daily stats to leaderboard
 ```
 
 ## API
