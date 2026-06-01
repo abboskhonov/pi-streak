@@ -6,14 +6,16 @@ export function usage(): string {
 
 Commands:
   today       Show today's activity breakdown
-  rank        Show leaderboard (default: all-time)
-              Use --day, --week, --month for periods
+  rank        Show leaderboard (default: all-time, top 20)
+              Use day, week, month, alltime for periods
+              Use --all to show full list
   sync        Sync all stats to the leaderboard
 
 Options:
   --dir <path>      Session directory path (default: ~/.pi/agent/sessions)
   --weeks <number>  Heatmap width in weeks, from 4 to 104 (default: 52)
   --json            Print computed data as JSON instead of the dashboard
+  --all             Show full leaderboard instead of top 20
   -h, --help        Show this help`;
 }
 
@@ -24,6 +26,7 @@ export function parseArgs(args: string[]): Options {
     json: false,
     command: "dashboard",
     rankPeriod: null,
+    rankAll: false,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -36,6 +39,11 @@ export function parseArgs(args: string[]): Options {
 
     if (argument === "--json") {
       options.json = true;
+      continue;
+    }
+
+    if (argument === "--all") {
+      options.rankAll = true;
       continue;
     }
 

@@ -72,7 +72,9 @@ async function main(): Promise<void> {
     const { fetchLeaderboard, getGitUsername, loadConfig } = await import("./sync");
     const config = loadConfig();
     const period = options.rankPeriod ?? "alltime";
-    const { users, period: returnedPeriod } = await fetchLeaderboard(period, config?.clientSecret);
+    const showAll = options.rankAll;
+    const limit = showAll ? 50 : 20;
+    const { users, period: returnedPeriod } = await fetchLeaderboard(period, config?.clientSecret, limit);
     const muted = (text: string) => color("38;5;245", text);
     const dim = (text: string) => color("38;5;240", text);
     const highlight = (text: string) => color("1;38;5;255", text);
@@ -82,8 +84,11 @@ async function main(): Promise<void> {
     const { formatTokens, padVisual, stripAnsi } = await import("./util");
 
     const currentUser = getGitUsername() ?? "";
+    const userInList = users.find((u) => u.username === currentUser);
+    const userRank = userInList?.rank ?? 0;
+    const showUser = userInList && !showAll && userRank > limit;
 
-    const wRank = Math.max(String(users.length).length, "#".length);
+    const wRank = Math.max(String(users.length + (showUser ? 1 : 0)).length, "#".length);
     const wUser = Math.max(...users.map((u) => `@${u.username}`.length + (u.username === currentUser ? 8 : 0)), "User".length);
     const wTokens = Math.max(...users.map((u) => formatTokens(u.tokens).length), "Tokens".length);
     const wStreak = Math.max(...users.map((u) => String(u.streak).length), "Streak".length);
@@ -108,7 +113,7 @@ async function main(): Promise<void> {
     console.log(headerRow);
     console.log(`  ${muted("─".repeat(totalWidth))}`);
 
-    for (const u of users) {
+    function renderRow(u: typeof users[0]) {
       const isYou = u.username === currentUser;
       const rankStr = String(u.rank).padStart(wRank);
       const userStr = isYou
@@ -129,6 +134,16 @@ async function main(): Promise<void> {
 
       console.log(`  ${styledRank}  ${styledUser}  ${styledTokens}  ${styledStreak}  ${styledToday}  ${styledActive}`);
       console.log(`  ${dim("─".repeat(totalWidth))}`);
+    }
+
+    for (let i = 0; i < users.length; i++) {
+      renderRow(users[i]);
+    }
+
+    if (showUser) {
+      console.log(`  ${dim("...".padStart(wRank))}  ${dim("...".padEnd(wUser))}  ${dim("...".padStart(wTokens))}  ${dim("...".padStart(wStreak))}  ${dim("...".padStart(wToday))}  ${dim("...".padStart(wActive))}`);
+      console.log(`  ${dim("─".repeat(totalWidth))}`);
+      renderRow(userInList);
     }
 
     const orangeSquare = color("38;5;208", "■");

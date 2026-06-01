@@ -4,6 +4,7 @@ export type Options = {
   json: boolean;
   command: "dashboard" | "today" | "rank" | "sync" | null;
   rankPeriod: string | null;
+  rankAll: boolean;
 };
 
 export type HourlyActivity = {

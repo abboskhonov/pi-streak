@@ -103,12 +103,12 @@ export async function sync(
   console.log(`  Synced ${data.synced ?? 0} days for @${username}`);
 }
 
-export async function fetchLeaderboard(period: string, clientSecret?: string): Promise<{
+export async function fetchLeaderboard(period: string, clientSecret?: string, limit = 50): Promise<{
   period: string;
   count: number;
   users: { rank: number; username: string; tokens: number; streak: number; activeDays: number; today: number }[];
 }> {
-  const res = await fetch(`${apiBase}/api/leaderboard?period=${period}&limit=50`, {
+  const res = await fetch(`${apiBase}/api/leaderboard?period=${period}&limit=${limit}`, {
     headers: clientSecret ? { "X-Client-Secret": clientSecret } : undefined,
   });
   if (!res.ok) {
