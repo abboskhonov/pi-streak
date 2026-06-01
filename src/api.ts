@@ -13,31 +13,23 @@ const MAX_STREAK = 3650;
 const MAX_ACTIVE_DAYS = 3650;
 const MAX_DAILY_COST = 100_000;
 
-async function verifySyncSignature(devicePubkey: string, payload: string, signature: string): Promise<boolean> {
+async function verifySyncSignature(devicePubkeyPem: string, payload: string, signature: string): Promise<boolean> {
   try {
     const encoder = new TextEncoder();
+    const pubKeyBytes = Uint8Array.from(atob(devicePubkeyPem), c => c.charCodeAt(0));
     const pubKey = await crypto.subtle.importKey(
-      'raw',
-      base64ToBytes(devicePubkey) as unknown as ArrayBuffer,
+      'spki',
+      pubKeyBytes as unknown as ArrayBuffer,
       { name: 'Ed25519' } as AlgorithmIdentifier,
       false,
       ['verify']
     );
-    const sig = base64ToBytes(signature);
-    const valid = await crypto.subtle.verify('Ed25519', pubKey, sig as unknown as ArrayBuffer, encoder.encode(payload));
+    const sigBytes = Uint8Array.from(atob(signature), c => c.charCodeAt(0));
+    const valid = await crypto.subtle.verify('Ed25519', pubKey, sigBytes as unknown as ArrayBuffer, encoder.encode(payload));
     return valid;
   } catch {
     return false;
   }
-}
-
-function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) {
-    bytes[i] = bin.charCodeAt(i);
-  }
-  return bytes;
 }
 
 function requireClientHeader(c: any) {
@@ -60,10 +52,10 @@ app.post('/api/register', async (c) => {
   if (headerCheck) return headerCheck;
 
   try {
-    const body = await c.req.json<{ username?: string; devicePubkey?: string; githubUsername?: string }>();
+    const body = await c.req.json<{ username?: string; devicePubkey?: string; githubToken?: string }>();
     const username = body?.username?.trim().toLowerCase();
     const devicePubkey = body?.devicePubkey?.trim();
-    const githubUsername = body?.githubUsername?.trim().toLowerCase();
+    const githubToken = body?.githubToken?.trim();
 
     if (!username || username.length < 2 || username.length > 39) return c.json({ error: 'Username must be 2-39 chars' }, 400);
     if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(username)) return c.json({ error: 'Username: lowercase alphanumeric, hyphens allowed' }, 400);
@@ -74,7 +66,18 @@ app.post('/api/register', async (c) => {
       return c.json({ error: 'Username taken', needsAuthorization: true }, 409);
     }
 
-    const user = await createUser(c.env.DB, username, githubUsername ?? null);
+    let githubUsername: string | null = null;
+    if (githubToken) {
+      const ghRes = await fetch('https://api.github.com/user', {
+        headers: { Authorization: `Bearer ${githubToken}`, 'User-Agent': 'pi-streak' }
+      });
+      if (ghRes.ok) {
+        const ghUser = await ghRes.json() as { login: string };
+        githubUsername = ghUser.login.toLowerCase();
+      }
+    }
+
+    const user = await createUser(c.env.DB, username, githubUsername);
     await addDevice(c.env.DB, user.id, devicePubkey);
     return c.json({ username: user.username, githubUsername: user.github_username }, 201);
   } catch (err) {

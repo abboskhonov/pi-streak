@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { createHmac } from "node:crypto";
+import { createHmac, generateKeyPairSync, sign, verify } from "node:crypto";
 import type { DailyRow } from "./lib/types";
 
 const configDir = join(homedir(), ".pi");
@@ -49,22 +49,19 @@ export function getGitUsername(): string | null {
   return null;
 }
 
-// Generate Ed25519 keypair using Web Crypto
-async function generateKeypair(): Promise<{ publicKey: string; privateKey: string }> {
-  const keypair = await crypto.subtle.generateKey(
-    { name: "Ed25519" } as AlgorithmIdentifier,
-    true,
-    ["sign", "verify"]
-  ) as CryptoKeyPair;
-  const pubKey = await crypto.subtle.exportKey("raw", keypair.publicKey);
-  const privKey = await crypto.subtle.exportKey("raw", keypair.privateKey);
+// Generate Ed25519 keypair using node:crypto
+function generateKeypair(): { publicKey: string; privateKey: string } {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
+    publicKeyEncoding: { type: 'spki', format: 'der' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'der' }
+  });
   return {
-    publicKey: btoa(String.fromCharCode(...new Uint8Array(pubKey as ArrayBuffer))),
-    privateKey: btoa(String.fromCharCode(...new Uint8Array(privKey as ArrayBuffer))),
+    publicKey: Buffer.from(publicKey).toString('base64'),
+    privateKey: Buffer.from(privateKey).toString('base64'),
   };
 }
 
-export async function getOrCreateKeypair(): Promise<{ publicKey: string; privateKey: string }> {
+export function getOrCreateKeypair(): { publicKey: string; privateKey: string } {
   if (existsSync(keyPath)) {
     const pem = readFileSync(keyPath, "utf-8");
     const lines = pem.split("\n").filter(Boolean);
@@ -73,32 +70,26 @@ export async function getOrCreateKeypair(): Promise<{ publicKey: string; private
       return { publicKey: pubKey, privateKey: privKey };
     }
   }
-  const keys = await generateKeypair();
+  const keys = generateKeypair();
   if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
   writeFileSync(keyPath, `PUBLIC:\n${keys.publicKey}\nPRIVATE:\n${keys.privateKey}\n`, { mode: 0o600 });
   return keys;
 }
 
-async function signPayload(privateKeyB64: string, payload: string): Promise<string> {
-  const privKeyBytes = Uint8Array.from(atob(privateKeyB64), c => c.charCodeAt(0));
-  const key = await crypto.subtle.importKey(
-    "raw",
-    privKeyBytes,
-    { name: "Ed25519" },
-    false,
-    ["sign"]
-  );
-  const sig = await crypto.subtle.sign("Ed25519", key, new TextEncoder().encode(payload));
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+function signPayload(privateKeyPem: string, payload: string): string {
+  const sig = sign(null, Buffer.from(payload, "utf-8"), Buffer.from(privateKeyPem, "base64"));
+  return sig.toString("base64");
 }
 
-export async function register(username: string, devicePubkey: string, clientSecret?: string): Promise<void> {
+export async function register(username: string, devicePubkey: string, clientSecret?: string, githubToken?: string): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (clientSecret) headers["X-Client-Secret"] = clientSecret;
+  const body: Record<string, string> = { username, devicePubkey };
+  if (githubToken) body.githubToken = githubToken;
   const res = await fetch(`${apiBase}/api/register`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ username, devicePubkey }),
+    body: JSON.stringify(body),
   });
   const data = await res.json() as { error?: string; needsAuthorization?: boolean };
   if (!res.ok) {
@@ -162,7 +153,7 @@ export async function sync(
     activeDays: Math.max(0, Math.floor(activeDays)),
   });
 
-  const signature = await signPayload(privateKey, payload);
+  const signature = signPayload(privateKey, payload);
 
   const res = await fetch(`${apiBase}/api/sync`, {
     method: "POST",

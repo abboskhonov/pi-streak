@@ -34,7 +34,7 @@ async function main(): Promise<void> {
     }
 
     const clientSecret = process.env.PI_STREAK_CLIENT_SECRET ?? "";
-    const { publicKey: devicePubkey, privateKey } = await getOrCreateKeypair();
+    const { publicKey: devicePubkey, privateKey } = getOrCreateKeypair();
 
     async function trySync() {
       await syncFn(username, devicePubkey, privateKey, daily, streaks.current, activeDays);
@@ -45,9 +45,21 @@ async function main(): Promise<void> {
         console.error("pi-streak: missing clientSecret. Set PI_STREAK_CLIENT_SECRET env var.");
         process.exit(1);
       }
+      let githubToken = (await getGithubToken()) ?? undefined;
+      if (!githubToken) {
+        const readline = require("readline");
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const prompt = (q: string) => new Promise<string>((resolve) => rl.question(q, resolve));
+        console.log("  GitHub token recommended for multi-device support.");
+        console.log("  Get one at: https://github.com/settings/tokens/new (scope: read:user)");
+        console.log("  Press Enter to skip (no multi-device support):");
+        const token = await prompt("  GitHub token (optional): ");
+        rl.close();
+        if (token.trim()) githubToken = token.trim();
+      }
       try {
-        await register(username, devicePubkey, clientSecret);
-        saveConfig({ username, devicePubkey });
+        await register(username, devicePubkey, clientSecret, githubToken);
+        saveConfig({ username, devicePubkey, githubToken });
         console.log(`  Registered @${username}. Device key saved to ~/.pi/streak.json`);
         await trySync();
       } catch (err) {
