@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { generateKeyPairSync, sign } from "node:crypto";
-import type { DailyRow } from "./lib/types";
+import type { DailyRow, SummaryRow } from "./lib/types";
 
 const configDir = join(homedir(), ".pi");
 const configPath = join(configDir, "streak.json");
@@ -105,6 +105,7 @@ export async function sync(
   devicePubkey: string,
   privateKey: string,
   daily: DailyRow[],
+  summary: SummaryRow,
   streak: number,
   activeDays: number
 ): Promise<void> {
@@ -113,6 +114,25 @@ export async function sync(
     console.log("  No activity found, nothing to sync.");
     return;
   }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const todayRow = daily.find((d) => d.day === today);
+  const weekStart = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+  const monthStart = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+  const weekTokens = daily.filter((d) => d.day >= weekStart).reduce((s, d) => s + d.tokens, 0);
+  const monthTokens = daily.filter((d) => d.day >= monthStart).reduce((s, d) => s + d.tokens, 0);
+
+  const stats = {
+    lifetimeTokens: summary.lifetimeTokens,
+    inputTokens: summary.inputTokens,
+    outputTokens: summary.outputTokens,
+    cacheTokens: summary.cacheTokens,
+    cost: summary.cost,
+    todayTokens: todayRow?.tokens ?? 0,
+    todayDate: today,
+    weekTokens,
+    monthTokens,
+  };
 
   const daysPayload = daysWithActivity.map((d) => ({
     date: d.day,
@@ -140,6 +160,7 @@ export async function sync(
     days: canonicalDays,
     streak: Math.max(0, Math.floor(streak)),
     activeDays: Math.max(0, Math.floor(activeDays)),
+    stats,
   });
 
   const signature = signPayload(privateKey, payload);
@@ -153,15 +174,16 @@ export async function sync(
       streak,
       activeDays,
       days: daysPayload,
+      stats,
       signature,
     }),
   });
 
-  const data = await res.json() as { ok?: boolean; synced?: number; error?: string };
+  const data = await res.json() as { ok?: boolean; error?: string };
   if (!res.ok) {
     throw new Error(data.error ?? `Sync failed (${res.status})`);
   }
-  console.log(`  Synced ${data.synced ?? 0} days for @${username}`);
+  console.log(`  Synced for @${username}`);
 }
 
 export async function fetchLeaderboard(period: string, limit = 50): Promise<{
@@ -189,7 +211,6 @@ export async function fetchUserProfile(username: string): Promise<{
   streak: number;
   activeDays: number;
   todayTokens: number;
-  daily: { date: string; tokens: number; turns: number; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number }[];
 }> {
   const res = await fetch(`${apiBase}/api/user/${encodeURIComponent(username)}`);
   if (!res.ok) {
@@ -211,7 +232,6 @@ export async function fetchUserProfile(username: string): Promise<{
     streak: number;
     activeDays: number;
     todayTokens: number;
-    daily: { date: string; tokens: number; turns: number; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number }[];
   }>;
 }
 

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { createUser, getUserByUsername, getUserByDevicePubkey, getUserByGithubUsername, addDevice, upsertDailyStats, getLeaderboardAllTime, getLeaderboardDay, getLeaderboardWeek, getLeaderboardMonth, updateDeviceLastSync, countSyncRequestsInLastHour, logSyncRequest, getUserProfile } from './db';
+import { createUser, getUserByUsername, getUserByDevicePubkey, getUserByGithubUsername, addDevice, upsertUserStats, getLeaderboardAllTime, getLeaderboardDay, getLeaderboardWeek, getLeaderboardMonth, updateDeviceLastSync, countSyncRequestsInLastHour, logSyncRequest, getUserProfile } from './db';
 
 export interface CloudflareBindings {
   DB: D1Database;
@@ -119,6 +119,17 @@ app.post('/api/sync', async (c) => {
       signature?: string;
       streak?: number;
       activeDays?: number;
+      stats?: {
+        lifetimeTokens: number;
+        inputTokens: number;
+        outputTokens: number;
+        cacheTokens: number;
+        cost: number;
+        todayTokens: number;
+        todayDate: string;
+        weekTokens: number;
+        monthTokens: number;
+      };
       days?: { date: string; tokens: number; requests: number; inputTokens?: number; outputTokens?: number; cacheTokens?: number; cost?: number }[];
     }>();
 
@@ -129,8 +140,8 @@ app.post('/api/sync', async (c) => {
     const user = await getUserByDevicePubkey(c.env.DB, devicePubkey);
     if (!user || user.username !== username) return c.json({ error: 'Invalid device' }, 401);
 
-    // Verify Ed25519 signature
-    const canonicalDays = (body?.days ?? []).map(d => ({
+    // Verify Ed25519 signature over canonical payload
+    const days = (body?.days ?? []).map(d => ({
       date: d.date,
       tokens: Math.max(0, Math.floor(d.tokens ?? 0)),
       requests: Math.max(0, Math.floor(d.requests ?? 0)),
@@ -139,7 +150,12 @@ app.post('/api/sync', async (c) => {
       cacheTokens: Math.max(0, Math.floor(d.cacheTokens ?? 0)),
       cost: Math.max(0, d.cost ?? 0),
     })).sort((a, b) => a.date.localeCompare(b.date));
-    const payload = JSON.stringify({ days: canonicalDays, streak: Math.max(0, Math.floor(body?.streak ?? 0)), activeDays: Math.max(0, Math.floor(body?.activeDays ?? 0)) });
+
+    const streak = Math.max(0, Math.floor(body?.streak ?? 0));
+    const activeDays = Math.max(0, Math.floor(body?.activeDays ?? 0));
+    const stats = body?.stats;
+
+    const payload = JSON.stringify({ days, streak, activeDays, stats });
 
     if (!body.signature || !await verifySyncSignature(devicePubkey, payload, body.signature)) {
       return c.json({ error: 'Invalid signature' }, 403);
@@ -150,44 +166,34 @@ app.post('/api/sync', async (c) => {
       return c.json({ error: `Rate limited. ${MAX_SYNC_PER_HOUR} syncs per hour exceeded.` }, 429);
     }
 
-    const days = body?.days ?? [];
-    if (days.length === 0) return c.json({ error: 'No days provided' }, 400);
-    if (days.length > 366) return c.json({ error: 'Too many days. Max 366 per sync.' }, 400);
+    // Validate totals
+    if (!stats) return c.json({ error: 'Missing stats' }, 400);
+
+    const lifetimeTokens = Math.max(0, Math.floor(stats.lifetimeTokens ?? 0));
+    if (lifetimeTokens > MAX_DAILY_TOKENS * 366) return c.json({ error: 'Token total exceeds maximum' }, 400);
+    if (streak > MAX_STREAK) return c.json({ error: 'Streak exceeds maximum allowed' }, 400);
+    if (activeDays > MAX_ACTIVE_DAYS) return c.json({ error: 'ActiveDays exceeds maximum allowed' }, 400);
 
     const today = new Date().toISOString().slice(0, 10);
-    const globalStreak = Math.max(0, Math.floor(body?.streak ?? 0));
-    const globalActiveDays = Math.max(0, Math.floor(body?.activeDays ?? 0));
 
-    if (globalStreak > MAX_STREAK) return c.json({ error: 'Streak exceeds maximum allowed' }, 400);
-    if (globalActiveDays > MAX_ACTIVE_DAYS) return c.json({ error: 'ActiveDays exceeds maximum allowed' }, 400);
-
-    let synced = 0;
-    for (const d of days) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date)) continue;
-      if (d.date > today) continue;
-      if (d.tokens > MAX_DAILY_TOKENS) continue;
-
-      const tokens = Math.max(0, Math.floor(d.tokens ?? 0));
-      const inputTokens = Math.max(0, Math.floor(d.inputTokens ?? 0));
-      const outputTokens = Math.max(0, Math.floor(d.outputTokens ?? 0));
-      const cacheTokens = Math.max(0, Math.floor(d.cacheTokens ?? 0));
-      const requests = Math.max(0, Math.floor(d.requests ?? 0));
-      const cost = Math.max(0, d.cost ?? 0);
-
-      if (cost > MAX_DAILY_COST) continue;
-
-      await upsertDailyStats(c.env.DB, user.id, d.date, {
-        tokens, inputTokens, outputTokens, cacheTokens, requests, cost,
-        streak: globalStreak,
-        activeDays: globalActiveDays,
-      });
-      synced += 1;
-    }
+    await upsertUserStats(c.env.DB, user.id, {
+      lifetimeTokens,
+      inputTokens: Math.max(0, Math.floor(stats.inputTokens ?? 0)),
+      outputTokens: Math.max(0, Math.floor(stats.outputTokens ?? 0)),
+      cacheTokens: Math.max(0, Math.floor(stats.cacheTokens ?? 0)),
+      cost: Math.max(0, stats.cost ?? 0),
+      streak,
+      activeDays,
+      todayTokens: Math.max(0, Math.floor(stats.todayTokens ?? 0)),
+      todayDate: stats.todayDate || today,
+      weekTokens: Math.max(0, Math.floor(stats.weekTokens ?? 0)),
+      monthTokens: Math.max(0, Math.floor(stats.monthTokens ?? 0)),
+    });
 
     await logSyncRequest(c.env.DB, user.id);
     await updateDeviceLastSync(c.env.DB, user.id, devicePubkey);
 
-    return c.json({ ok: true, synced, username: user.username }, 200);
+    return c.json({ ok: true, username: user.username }, 200);
   } catch (err) {
     console.error('sync failed', err);
     return c.json({ error: 'Sync failed' }, 500);
@@ -197,13 +203,12 @@ app.post('/api/sync', async (c) => {
 app.get('/api/leaderboard', async (c) => {
   const period = c.req.query('period') ?? 'alltime';
   const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '50', 10)));
-  const today = new Date().toISOString().slice(0, 10);
 
   let rows: { username: string; tokens: number; streak: number; activeDays: number; todayTokens: number }[];
-  if (period === 'day') rows = await getLeaderboardDay(c.env.DB, today, limit);
-  else if (period === 'week') rows = await getLeaderboardWeek(c.env.DB, today, limit);
-  else if (period === 'month') rows = await getLeaderboardMonth(c.env.DB, today, limit);
-  else rows = await getLeaderboardAllTime(c.env.DB, today, limit);
+  if (period === 'day') rows = await getLeaderboardDay(c.env.DB, limit);
+  else if (period === 'week') rows = await getLeaderboardWeek(c.env.DB, limit);
+  else if (period === 'month') rows = await getLeaderboardMonth(c.env.DB, limit);
+  else rows = await getLeaderboardAllTime(c.env.DB, limit);
 
   return c.json({ period, generatedAt: new Date().toISOString(), count: rows.length, users: rows.map((r, i) => ({ rank: i + 1, username: r.username, tokens: r.tokens, streak: r.streak, activeDays: r.activeDays, today: r.todayTokens })) });
 });
@@ -211,22 +216,11 @@ app.get('/api/leaderboard', async (c) => {
 app.get('/api/user/:username', async (c) => {
   try {
     const username = c.req.param('username').trim().toLowerCase();
-    const today = new Date().toISOString().slice(0, 10);
-    const profile = await getUserProfile(c.env.DB, username, today);
+    const profile = await getUserProfile(c.env.DB, username);
     if (!profile) {
       return c.json({ error: 'User not found' }, 404);
     }
-    return c.json({
-      username: profile.username,
-      githubUsername: profile.githubUsername,
-      createdAt: profile.createdAt,
-      rank: profile.rank,
-      lifetimeTokens: profile.lifetimeTokens,
-      streak: profile.streak,
-      activeDays: profile.activeDays,
-      todayTokens: profile.todayTokens,
-      daily: profile.daily,
-    }, 200);
+    return c.json(profile, 200);
   } catch (err) {
     console.error('user profile failed', err);
     return c.json({ error: 'Failed to fetch user profile' }, 500);

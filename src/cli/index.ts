@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { parseArgs, usage } from "./args";
 import { loadData, loadTodayData, computeStreaks } from "./parser";
 import { renderDashboard, renderLeaderboard, renderToday, renderUserDashboard } from "./render";
-import { color, formatPath } from "./util";
+import { color, formatPath, formatTokens } from "./util";
 
 async function main(): Promise<void> {
   let options;
@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   if (options.command === "sync") {
     const { loadConfig, getGitUsername, saveConfig, getOrCreateKeypair, register, authorizeDevice, sync: syncFn, getGithubToken } = await import("./sync");
     const config = loadConfig();
-    const { daily } = loadData(options.dirPath);
+    const { summary, daily } = loadData(options.dirPath);
     const streaks = computeStreaks(new Set(daily.filter((day) => day.turns > 0).map((day) => day.day)));
     const activeDays = daily.filter((day) => day.turns > 0).length;
 
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
     const devicePubkey = devicePubkeyRaw.trim();
 
     async function trySync() {
-      await syncFn(username, devicePubkey, privateKey, daily, streaks.current, activeDays);
+      await syncFn(username, devicePubkey, privateKey, daily, summary, streaks.current, activeDays);
     }
 
     async function doRegister() {
@@ -134,16 +134,7 @@ async function main(): Promise<void> {
     try {
       const { fetchUserProfile } = await import("./sync");
       const profile = await fetchUserProfile(options.username);
-      const daily: { day: string; tokens: number; turns: number; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number }[] = profile.daily.map((d) => ({
-        day: d.date,
-        tokens: d.tokens,
-        turns: d.turns,
-        inputTokens: d.inputTokens,
-        outputTokens: d.outputTokens,
-        cacheTokens: d.cacheTokens,
-        cost: d.cost,
-      }));
-      console.log(renderUserDashboard(profile.username, options.weeks, daily, profile.streak, profile.lifetimeTokens, profile.rank));
+      console.log(`  @${profile.username}  rank #${profile.rank}  ${formatTokens(profile.lifetimeTokens)} tokens  ${profile.streak} day streak  ${profile.activeDays} active days`);
     } catch (err) {
       console.error(`pi-streak: ${(err as Error).message}`);
       process.exit(1);
