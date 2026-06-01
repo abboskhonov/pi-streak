@@ -1,11 +1,11 @@
 {
   "name": "pi-streak",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "type": "module",
   "description": "pi-streak leaderboard API + CLI",
   "main": "src/index.ts",
   "bin": {
-    "pi-streak": "bin.js"
+    "pi-streak": "bin.cjs"
   },
   "scripts": {
     "dev": "wrangler dev",
@@ -21,7 +21,7 @@
   },
   "files": [
     "src",
-    "bin.js",
+    "bin.cjs",
     "wrangler.jsonc",
     "schema.sql"
   ],
