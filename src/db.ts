@@ -36,7 +36,7 @@ export async function getUserByGithubUsername(db: D1Database, githubUsername: st
 export async function getUserByDevicePubkey(db: D1Database, devicePubkey: string): Promise<User | null> {
   const normalized = devicePubkey.replace(/\s/g, '');
   const result = await db
-    .prepare("SELECT u.* FROM users u JOIN user_devices d ON u.id = d.user_id WHERE REPLACE(REPLACE(REPLACE(d.device_pubkey, x'0A', ''), x'0D', ''), ' ', '') = ?")
+    .prepare('SELECT u.* FROM users u JOIN user_devices d ON u.id = d.user_id WHERE d.device_pubkey = ?')
     .bind(normalized)
     .first<User>();
   return result ?? null;
@@ -44,9 +44,10 @@ export async function getUserByDevicePubkey(db: D1Database, devicePubkey: string
 
 export async function addDevice(db: D1Database, userId: number, devicePubkey: string): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
+  const normalized = devicePubkey.replace(/\s/g, '');
   await db
     .prepare('INSERT INTO user_devices (user_id, device_pubkey, created_at, last_sync) VALUES (?, ?, ?, ?)')
-    .bind(userId, devicePubkey, now, 0)
+    .bind(userId, normalized, now, 0)
     .run();
 }
 
