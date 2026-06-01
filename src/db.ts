@@ -36,7 +36,7 @@ export async function getUserByGithubUsername(db: D1Database, githubUsername: st
 export async function getUserByDevicePubkey(db: D1Database, devicePubkey: string): Promise<User | null> {
   const normalized = devicePubkey.replace(/\s/g, '');
   const result = await db
-    .prepare('SELECT u.* FROM users u JOIN user_devices d ON u.id = d.user_id WHERE REPLACE(REPLACE(d.device_pubkey, CHAR(10), \'\'), CHAR(13), \'\') = ?')
+    .prepare("SELECT u.* FROM users u JOIN user_devices d ON u.id = d.user_id WHERE REPLACE(REPLACE(REPLACE(d.device_pubkey, x'0A', ''), x'0D', ''), ' ', '') = ?")
     .bind(normalized)
     .first<User>();
   return result ?? null;
