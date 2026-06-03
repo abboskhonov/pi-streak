@@ -59,3 +59,10 @@ export function truncateModel(model: string, maxLen: number): string {
   const keep = Math.floor((maxLen - 3) / 2);
   return model.slice(0, keep) + "..." + model.slice(-keep);
 }
+
+export function extractProjectName(folderName: string): string {
+  const stripped = folderName.replace(/^--/, "").replace(/--$/, "");
+  if (!stripped) return folderName;
+  const parts = stripped.split("-");
+  return parts.pop() || folderName;
+}

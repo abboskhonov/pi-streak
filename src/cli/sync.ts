@@ -211,6 +211,7 @@ export async function fetchUserProfile(username: string): Promise<{
   streak: number;
   activeDays: number;
   todayTokens: number;
+  daily: { date: string; tokens: number; requests: number; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number }[];
 }> {
   const res = await fetch(`${apiBase}/api/user/${encodeURIComponent(username)}`);
   if (!res.ok) {
@@ -232,6 +233,7 @@ export async function fetchUserProfile(username: string): Promise<{
     streak: number;
     activeDays: number;
     todayTokens: number;
+    daily: { date: string; tokens: number; requests: number; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number }[];
   }>;
 }
 

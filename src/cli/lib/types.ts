@@ -2,10 +2,11 @@ export type Options = {
   dirPath: string;
   weeks: number;
   json: boolean;
-  command: "dashboard" | "today" | "rank" | "sync" | "user" | null;
+  command: "dashboard" | "today" | "rank" | "sync" | "user" | "models" | "projects" | "cost" | "peak" | "month";
   rankPeriod: string | null;
   rankAll: boolean;
   username: string | null;
+  month: string | null;
 };
 
 export type HourlyActivity = {
@@ -33,7 +34,7 @@ export type ProjectRow = {
   outputTokens: number;
   cacheTokens: number;
   cost: number;
-  requests: number;
+  sessions: number;
 };
 
 export type SummaryRow = {
@@ -56,6 +57,8 @@ export type DailyRow = {
   outputTokens: number;
   cacheTokens: number;
   cost: number;
+  projects: number;
+  sessions: number;
 };
 
 export type DayActivity = {
@@ -65,6 +68,8 @@ export type DayActivity = {
   outputTokens: number;
   cacheTokens: number;
   cost: number;
+  projects: Set<string>;
+  sessions: number;
 };
 
 export type ModelRow = {
@@ -75,6 +80,7 @@ export type ModelRow = {
   cacheTokens: number;
   cost: number;
   turns: number;
+  sessions: number;
 };
 
 export type PiMessage = {
@@ -109,6 +115,16 @@ export type Pricing = {
   output: number;
   cacheRead: number;
   cacheWrite: number;
+};
+
+export type PeakDay = {
+  day: string;
+  tokens: number;
+  cost: number;
+  sessions: number;
+  projects: number;
+  models: { model: string; tokens: number; cost: number }[];
+  projectBreakdown: { project: string; tokens: number; cost: number }[];
 };
 
 export type LeaderboardEntry = {

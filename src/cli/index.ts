@@ -3,7 +3,8 @@
 import { existsSync } from "node:fs";
 import { parseArgs, usage } from "./args";
 import { loadData, loadTodayData, computeStreaks } from "./parser";
-import { renderDashboard, renderLeaderboard, renderToday, renderUserDashboard } from "./render";
+import type { DailyRow } from "./lib/types";
+import { renderCost, renderDashboard, renderLeaderboard, renderModels, renderMonth, renderPeak, renderProjects, renderToday, renderUserDashboard } from "./render";
 import { color, formatPath, formatTokens } from "./util";
 
 async function main(): Promise<void> {
@@ -125,6 +126,10 @@ async function main(): Promise<void> {
     const showAll = options.rankAll;
     const limit = showAll ? 50 : 20;
     const { users, period: returnedPeriod } = await fetchLeaderboard(period, limit);
+    if (options.json) {
+      console.log(JSON.stringify({ users, period: returnedPeriod }, null, 2));
+      return;
+    }
     const currentUser = getGitUsername() ?? "";
     console.log(renderLeaderboard(users, returnedPeriod, currentUser, showAll, limit));
     return;
@@ -134,7 +139,22 @@ async function main(): Promise<void> {
     try {
       const { fetchUserProfile } = await import("./sync");
       const profile = await fetchUserProfile(options.username);
-      console.log(`  @${profile.username}  rank #${profile.rank}  ${formatTokens(profile.lifetimeTokens)} tokens  ${profile.streak} day streak  ${profile.activeDays} active days`);
+      const daily: DailyRow[] = (profile.daily ?? []).map((d) => ({
+        day: d.date,
+        tokens: d.tokens,
+        turns: d.requests,
+        inputTokens: d.inputTokens ?? 0,
+        outputTokens: d.outputTokens ?? 0,
+        cacheTokens: d.cacheTokens ?? 0,
+        cost: d.cost ?? 0,
+        projects: 0,
+        sessions: 0,
+      }));
+      if (options.json) {
+        console.log(JSON.stringify({ profile, daily }, null, 2));
+        return;
+      }
+      console.log(renderUserDashboard(profile.username, options.weeks, daily, profile.streak, profile.lifetimeTokens, profile.rank, profile.todayTokens, profile.activeDays));
     } catch (err) {
       console.error(`pi-streak: ${(err as Error).message}`);
       process.exit(1);
@@ -142,8 +162,73 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { summary, daily, models, projects } = loadData(options.dirPath);
+  const { summary, daily, models, projects, peakDay } = loadData(options.dirPath);
   const streaks = computeStreaks(new Set(daily.filter((day) => day.turns > 0).map((day) => day.day)));
+
+  if (options.command === "month") {
+    const month = options.month ?? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    if (options.json) {
+      console.log(JSON.stringify({ month, daily: daily.filter(d => d.day.startsWith(month)) }, null, 2));
+      return;
+    }
+    console.log(renderMonth(month, daily));
+    return;
+  }
+
+  if (options.command === "today") {
+    const todayData = loadTodayData(options.dirPath);
+    if (options.json) {
+      console.log(JSON.stringify(todayData, null, 2));
+      return;
+    }
+    console.log(renderToday(todayData));
+    return;
+  }
+
+  if (options.command === "models") {
+    if (options.json) {
+      console.log(JSON.stringify({ models }, null, 2));
+      return;
+    }
+    console.log(renderModels(models));
+    return;
+  }
+
+  if (options.command === "projects") {
+    if (options.json) {
+      console.log(JSON.stringify({ projects }, null, 2));
+      return;
+    }
+    console.log(renderProjects(projects));
+    return;
+  }
+
+  if (options.command === "cost") {
+    if (options.json) {
+      console.log(JSON.stringify({ daily: daily.slice(-30).reverse() }, null, 2));
+      return;
+    }
+    console.log(renderCost(daily));
+    return;
+  }
+
+  if (options.command === "peak") {
+    if (options.json) {
+      console.log(JSON.stringify({ peakDay }, null, 2));
+      return;
+    }
+    console.log(renderPeak(peakDay));
+    return;
+  }
+
+  if (options.month) {
+    if (options.json) {
+      console.log(JSON.stringify({ month: options.month, daily: daily.filter(d => d.day.startsWith(options.month!)) }, null, 2));
+      return;
+    }
+    console.log(renderMonth(options.month, daily));
+    return;
+  }
 
   if (options.json) {
     console.log(
@@ -160,12 +245,6 @@ async function main(): Promise<void> {
         2,
       ),
     );
-    return;
-  }
-
-  if (options.command === "today") {
-    const todayData = loadTodayData(options.dirPath);
-    console.log(renderToday(todayData));
     return;
   }
 

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { createUser, getUserByUsername, getUserByDevicePubkey, getUserByGithubUsername, addDevice, upsertUserStats, getLeaderboardAllTime, getLeaderboardDay, getLeaderboardWeek, getLeaderboardMonth, updateDeviceLastSync, countSyncRequestsInLastHour, logSyncRequest, getUserProfile } from './db';
+import { createUser, getUserByUsername, getUserByDevicePubkey, getUserByGithubUsername, addDevice, upsertUserStats, upsertDailyStats, getLeaderboardAllTime, getLeaderboardDay, getLeaderboardWeek, getLeaderboardMonth, updateDeviceLastSync, countSyncRequestsInLastHour, logSyncRequest, getUserProfile } from './db';
 
 export interface CloudflareBindings {
   DB: D1Database;
@@ -189,6 +189,8 @@ app.post('/api/sync', async (c) => {
       weekTokens: Math.max(0, Math.floor(stats.weekTokens ?? 0)),
       monthTokens: Math.max(0, Math.floor(stats.monthTokens ?? 0)),
     });
+
+    await upsertDailyStats(c.env.DB, user.id, days);
 
     await logSyncRequest(c.env.DB, user.id);
     await updateDeviceLastSync(c.env.DB, user.id, devicePubkey);

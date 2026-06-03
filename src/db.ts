@@ -115,6 +115,24 @@ export async function upsertUserStats(db: D1Database, userId: number, stats: {
     .run();
 }
 
+export async function upsertDailyStats(db: D1Database, userId: number, days: { date: string; tokens: number; requests: number; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number }[]): Promise<void> {
+  if (days.length === 0) return;
+  const stmts = days.map((d) =>
+    db
+      .prepare(`INSERT INTO daily_stats (user_id, date, tokens, input_tokens, output_tokens, cache_tokens, requests, cost)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, date) DO UPDATE SET
+          tokens = excluded.tokens,
+          input_tokens = excluded.input_tokens,
+          output_tokens = excluded.output_tokens,
+          cache_tokens = excluded.cache_tokens,
+          requests = excluded.requests,
+          cost = excluded.cost`)
+      .bind(userId, d.date, d.tokens, d.inputTokens, d.outputTokens, d.cacheTokens, d.requests, d.cost)
+  );
+  await db.batch(stmts);
+}
+
 export async function getLeaderboardAllTime(db: D1Database, limit: number = 50): Promise<LeaderboardRow[]> {
   try {
     const result = await db
@@ -163,6 +181,16 @@ export async function getLeaderboardMonth(db: D1Database, limit: number = 50): P
   }
 }
 
+export type DailyStat = {
+  date: string;
+  tokens: number;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheTokens: number;
+  cost: number;
+};
+
 export type UserProfile = {
   username: string;
   githubUsername: string | null;
@@ -172,6 +200,7 @@ export type UserProfile = {
   activeDays: number;
   todayTokens: number;
   rank: number;
+  daily: DailyStat[];
 };
 
 export async function getUserProfile(db: D1Database, username: string): Promise<UserProfile | null> {
@@ -194,6 +223,13 @@ export async function getUserProfile(db: D1Database, username: string): Promise<
     .first<{ count: number }>();
   const rank = (rankResult?.count ?? 0) + 1;
 
+  // Fetch per-day activity for the heatmap
+  const dailyResult = await db
+    .prepare('SELECT date, tokens, requests, input_tokens as inputTokens, output_tokens as outputTokens, cache_tokens as cacheTokens, cost FROM daily_stats WHERE user_id = ? ORDER BY date')
+    .bind(user.id)
+    .all<DailyStat>();
+  const daily = dailyResult.results ?? [];
+
   return {
     username: user.username,
     githubUsername: user.github_username,
@@ -203,5 +239,6 @@ export async function getUserProfile(db: D1Database, username: string): Promise<
     activeDays,
     todayTokens,
     rank,
+    daily,
   };
 }

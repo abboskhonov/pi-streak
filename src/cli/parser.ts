@@ -5,6 +5,7 @@ import type {
   DailyRow,
   DayActivity,
   ModelRow,
+  PeakDay,
   PiMessage,
   Pricing,
   ProjectRow,
@@ -89,6 +90,7 @@ export function loadData(dirPath: string): {
   daily: DailyRow[];
   models: ModelRow[];
   projects: ProjectRow[];
+  peakDay: PeakDay | null;
 } {
   const pricing = loadPricing();
   const summary: SummaryRow = {
@@ -109,10 +111,13 @@ export function loadData(dirPath: string): {
   let longestTaskMs = 0;
 
   const modelUsage = new Map<string, ModelRow>();
+  const modelSessions = new Map<string, Set<string>>();
   const projectUsage = new Map<string, ProjectRow>();
+  const dayModels = new Map<string, Map<string, { tokens: number; cost: number }>>();
+  const dayProjects = new Map<string, Map<string, { tokens: number; cost: number }>>();
 
   if (!existsSync(dirPath)) {
-    return { summary, daily: [], models: [], projects: [] };
+    return { summary, daily: [], models: [], projects: [], peakDay: null };
   }
 
   const entries = readdirSync(dirPath, { withFileTypes: true });
@@ -129,11 +134,27 @@ export function loadData(dirPath: string): {
       const sessionId = file.replace(/\.jsonl$/, "");
       sessionIds.add(sessionId);
 
+      const projectName = entry.name;
+
+      if (!projectUsage.has(projectName)) {
+        projectUsage.set(projectName, {
+          project: projectName,
+          tokens: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheTokens: 0,
+          cost: 0,
+          sessions: 0,
+        });
+      }
+      const projectRow = projectUsage.get(projectName)!;
+      projectRow.sessions += 1;
+
       let sessionTokens = 0;
       let sessionStartMs = 0;
       let sessionEndMs = 0;
       let currentModel = "unknown";
-      let currentProject = "unknown";
+      let fileDaysCounted = new Set<string>();
 
       const text = readFileSync(filePath, "utf-8");
       const lines = text.split("\n").filter((l) => l.trim());
@@ -145,9 +166,6 @@ export function loadData(dirPath: string): {
             const ts = new Date(entry.timestamp).getTime();
             sessionStartMs = ts;
             if (sessionEndMs === 0) sessionEndMs = ts;
-            if (entry.cwd) {
-              currentProject = entry.cwd;
-            }
           }
 
           if (entry.type === "model_change" && entry.modelId) {
@@ -166,9 +184,14 @@ export function loadData(dirPath: string): {
             }
 
             if (!activity.has(day)) {
-              activity.set(day, { tokens: 0, turns: 0, inputTokens: 0, outputTokens: 0, cacheTokens: 0, cost: 0 });
+              activity.set(day, { tokens: 0, turns: 0, inputTokens: 0, outputTokens: 0, cacheTokens: 0, cost: 0, projects: new Set(), sessions: 0 });
             }
             const dayAct = activity.get(day)!;
+            dayAct.projects.add(projectName);
+            if (!fileDaysCounted.has(day)) {
+              fileDaysCounted.add(day);
+              dayAct.sessions += 1;
+            }
 
             if (role === "assistant") {
               dayAct.turns += 1;
@@ -204,7 +227,9 @@ export function loadData(dirPath: string): {
                   cacheTokens: 0,
                   cost: 0,
                   turns: 0,
+                  sessions: 0,
                 });
+                modelSessions.set(msgModel, new Set());
               }
               const modelRow = modelUsage.get(msgModel)!;
               modelRow.tokens += total;
@@ -215,27 +240,35 @@ export function loadData(dirPath: string): {
               if (role === "assistant") {
                 modelRow.turns += 1;
               }
+              modelSessions.get(msgModel)!.add(sessionId);
 
-              if (!projectUsage.has(currentProject)) {
-                projectUsage.set(currentProject, {
-                  project: currentProject,
-                  tokens: 0,
-                  inputTokens: 0,
-                  outputTokens: 0,
-                  cacheTokens: 0,
-                  cost: 0,
-                  requests: 0,
-                });
+              if (!dayModels.has(day)) {
+                dayModels.set(day, new Map());
               }
-              const projectRow = projectUsage.get(currentProject)!;
+              const dayModelMap = dayModels.get(day)!;
+              if (!dayModelMap.has(msgModel)) {
+                dayModelMap.set(msgModel, { tokens: 0, cost: 0 });
+              }
+              const dm = dayModelMap.get(msgModel)!;
+              dm.tokens += total;
+              dm.cost += cost;
+
+              if (!dayProjects.has(day)) {
+                dayProjects.set(day, new Map());
+              }
+              const dayProjectMap = dayProjects.get(day)!;
+              if (!dayProjectMap.has(projectName)) {
+                dayProjectMap.set(projectName, { tokens: 0, cost: 0 });
+              }
+              const dp = dayProjectMap.get(projectName)!;
+              dp.tokens += total;
+              dp.cost += cost;
+
               projectRow.tokens += total;
               projectRow.inputTokens += input;
               projectRow.outputTokens += output;
               projectRow.cacheTokens += cacheTotal;
               projectRow.cost += cost;
-              if (role === "assistant") {
-                projectRow.requests += 1;
-              }
             }
           }
         } catch {
@@ -263,13 +296,36 @@ export function loadData(dirPath: string): {
       outputTokens: data.outputTokens,
       cacheTokens: data.cacheTokens,
       cost: data.cost,
+      projects: data.projects.size,
+      sessions: data.sessions,
     }))
     .sort((a, b) => a.day.localeCompare(b.day));
+
+  for (const [model, ids] of modelSessions) {
+    const row = modelUsage.get(model);
+    if (row) row.sessions = ids.size;
+  }
 
   const models = [...modelUsage.values()].sort((a, b) => b.tokens - a.tokens);
   const projects = [...projectUsage.values()].sort((a, b) => b.tokens - a.tokens);
 
-  return { summary, daily, models, projects };
+  let peakDay: PeakDay | null = null;
+  if (daily.length > 0) {
+    const peak = daily.reduce((max, d) => (d.cost > max.cost ? d : max), daily[0]);
+    const dm = dayModels.get(peak.day) ?? new Map();
+    const dp = dayProjects.get(peak.day) ?? new Map();
+    peakDay = {
+      day: peak.day,
+      tokens: peak.tokens,
+      cost: peak.cost,
+      sessions: peak.sessions,
+      projects: peak.projects,
+      models: [...dm.entries()].map(([model, data]) => ({ model, tokens: data.tokens, cost: data.cost })).sort((a, b) => b.cost - a.cost),
+      projectBreakdown: [...dp.entries()].map(([project, data]) => ({ project, tokens: data.tokens, cost: data.cost })).sort((a, b) => b.cost - a.cost),
+    };
+  }
+
+  return { summary, daily, models, projects, peakDay };
 }
 
 export function loadTodayData(dirPath: string): TodayData {
@@ -288,6 +344,7 @@ export function loadTodayData(dirPath: string): TodayData {
   };
 
   const modelUsage = new Map<string, ModelRow>();
+  const modelSessions = new Map<string, Set<string>>();
   const projectUsage = new Map<string, ProjectRow>();
 
   if (!existsSync(dirPath)) return todayData;
@@ -302,18 +359,16 @@ export function loadTodayData(dirPath: string): TodayData {
       const stats = statSync(filePath);
       if (stats.size === 0) continue;
 
+      const sessionId = file.replace(/\.jsonl$/, "");
+      const projectName = entry.name;
       let currentModel = "unknown";
-      let currentProject = "unknown";
+      let fileHadToday = false;
 
       const text = readFileSync(filePath, "utf-8");
       const lines = text.split("\n").filter((l) => l.trim());
       for (const line of lines) {
         try {
           const entry = JSON.parse(line) as PiMessage;
-
-          if (entry.type === "session" && entry.cwd) {
-            currentProject = entry.cwd;
-          }
 
           if (entry.type === "model_change" && entry.modelId) {
             currentModel = entry.modelId;
@@ -323,6 +378,7 @@ export function loadTodayData(dirPath: string): TodayData {
             const ts = entry.timestamp;
             const day = ts ? localDay(new Date(ts)) : localDay(new Date());
             if (day !== today) continue;
+            fileHadToday = true;
 
             const role = entry.message.role;
             const usage = entry.message.usage;
@@ -359,7 +415,9 @@ export function loadTodayData(dirPath: string): TodayData {
                   cacheTokens: 0,
                   cost: 0,
                   turns: 0,
+                  sessions: 0,
                 });
+                modelSessions.set(msgModel, new Set());
               }
               const modelRow = modelUsage.get(msgModel)!;
               modelRow.tokens += total;
@@ -370,34 +428,44 @@ export function loadTodayData(dirPath: string): TodayData {
               if (role === "assistant") {
                 modelRow.turns += 1;
               }
+              modelSessions.get(msgModel)!.add(sessionId);
 
-              if (!projectUsage.has(currentProject)) {
-                projectUsage.set(currentProject, {
-                  project: currentProject,
+              if (!projectUsage.has(projectName)) {
+                projectUsage.set(projectName, {
+                  project: projectName,
                   tokens: 0,
                   inputTokens: 0,
                   outputTokens: 0,
                   cacheTokens: 0,
                   cost: 0,
-                  requests: 0,
+                  sessions: 0,
                 });
               }
-              const projectRow = projectUsage.get(currentProject)!;
+              const projectRow = projectUsage.get(projectName)!;
               projectRow.tokens += total;
               projectRow.inputTokens += input;
               projectRow.outputTokens += output;
               projectRow.cacheTokens += cacheTotal;
               projectRow.cost += cost;
-              if (role === "assistant") {
-                projectRow.requests += 1;
-              }
             }
           }
         } catch {
           // Skip malformed lines
         }
       }
+
+      if (fileHadToday) {
+        const projectRow = projectUsage.get(projectName);
+        if (projectRow) {
+          projectRow.sessions += 1;
+        }
+      }
     }
+  }
+
+  for (const [model, ids] of modelSessions) {
+    const row = modelUsage.get(model);
+    if (row) row.sessions = ids.size;
   }
 
   todayData.models = [...modelUsage.values()].sort((a, b) => b.tokens - a.tokens);
