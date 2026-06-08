@@ -1,6 +1,6 @@
 {
   "name": "pi-streak",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "type": "module",
   "description": "pi-streak leaderboard API + CLI",
   "main": "src/index.ts",
