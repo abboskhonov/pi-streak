@@ -16,8 +16,94 @@ import { localDay } from "./util";
 
 const modelsJsonPath = join(homedir(), ".pi", "agent", "models.json");
 
-export function loadPricing(): Map<string, Pricing> {
+function findBuiltInModelsPath(): string | null {
+  const candidates = [
+    join(homedir(), ".npm-global", "lib", "node_modules", "@earendil-works", "pi-coding-agent", "node_modules", "@earendil-works", "pi-ai", "dist", "models.generated.js"),
+    join(homedir(), ".npm-global", "lib", "node_modules", "@mariozechner", "pi-coding-agent", "node_modules", "@earendil-works", "pi-ai", "dist", "models.generated.js"),
+    join(homedir(), ".pi", "agent", "npm", "node_modules", "@earendil-works", "pi-coding-agent", "node_modules", "@earendil-works", "pi-ai", "dist", "models.generated.js"),
+    join(homedir(), ".pi", "agent", "npm", "node_modules", "@mariozechner", "pi-coding-agent", "node_modules", "@earendil-works", "pi-ai", "dist", "models.generated.js"),
+  ];
+  for (const path of candidates) {
+    if (existsSync(path)) return path;
+  }
+  return null;
+}
+
+function loadBuiltInPricing(): Map<string, Pricing> {
   const pricing = new Map<string, Pricing>();
+  const path = findBuiltInModelsPath();
+  if (!path) return pricing;
+
+  try {
+    const text = readFileSync(path, "utf-8");
+    let currentModelId: string | null = null;
+    let inCost = false;
+    let costDepth = 0;
+    let costValues: Partial<Pricing> = {};
+
+    const lines = text.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      // Capture model id
+      const idMatch = trimmed.match(/^id:\s*"([^"]+)"/);
+      if (idMatch) {
+        currentModelId = idMatch[1]!;
+        continue;
+      }
+
+      // Enter cost block
+      if (currentModelId && trimmed.startsWith("cost: {")) {
+        inCost = true;
+        costDepth = 1;
+        costValues = {};
+        continue;
+      }
+
+      if (inCost) {
+        // Track nested braces to handle multi-line cost blocks
+        for (const ch of trimmed) {
+          if (ch === "{") costDepth++;
+          if (ch === "}") costDepth--;
+        }
+
+        const inputMatch = trimmed.match(/^input:\s*([\d.]+)/);
+        if (inputMatch) costValues.input = parseFloat(inputMatch[1]!);
+
+        const outputMatch = trimmed.match(/^output:\s*([\d.]+)/);
+        if (outputMatch) costValues.output = parseFloat(outputMatch[1]!);
+
+        const cacheReadMatch = trimmed.match(/^cacheRead:\s*([\d.]+)/);
+        if (cacheReadMatch) costValues.cacheRead = parseFloat(cacheReadMatch[1]!);
+
+        const cacheWriteMatch = trimmed.match(/^cacheWrite:\s*([\d.]+)/);
+        if (cacheWriteMatch) costValues.cacheWrite = parseFloat(cacheWriteMatch[1]!);
+
+        if (costDepth <= 0) {
+          if (currentModelId && costValues.input !== undefined && costValues.output !== undefined) {
+            pricing.set(currentModelId, {
+              input: costValues.input,
+              output: costValues.output,
+              cacheRead: costValues.cacheRead ?? 0,
+              cacheWrite: costValues.cacheWrite ?? 0,
+            });
+          }
+          inCost = false;
+          currentModelId = null;
+        }
+      }
+    }
+  } catch {
+    // ignore errors reading built-in models
+  }
+  return pricing;
+}
+
+export function loadPricing(): Map<string, Pricing> {
+  // Start with built-in pricing so official models always have costs
+  const pricing = loadBuiltInPricing();
+
+  // Apply custom overrides from models.json
   if (!existsSync(modelsJsonPath)) return pricing;
 
   try {
